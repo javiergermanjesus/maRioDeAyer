@@ -1,0 +1,305 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Press Start 2P', monospace;
+  color: #ffffff;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  background-color: #000;
+}
+
+/* Pantalla NES principal con cielo verde y amarillo */
+.nes-screen {
+  position: relative;
+  width: 1280px;
+  height: 720px;
+  background: linear-gradient(180deg, #92dc12 0%, #f7d000 65%, #e09800 100%);
+  overflow: hidden;
+  box-shadow: 0 0 30px rgba(0,0,0,0.8);
+}
+
+.scanlines {
+  position: absolute;
+  top: 0; left: 0; width: 100%; height: 100%;
+  background: linear-gradient(
+    rgba(18, 16, 16, 0) 50%, 
+    rgba(0, 0, 0, 0.2) 50%
+  );
+  background-size: 100% 4px;
+  z-index: 20;
+  pointer-events: none;
+}
+
+/* HUD Superior */
+.nes-hud {
+  position: absolute;
+  top: 30px;
+  left: 80px;
+  right: 80px;
+  display: flex;
+  justify-content: space-between;
+  font-size: 22px;
+  line-height: 1.4;
+  text-shadow: 4px 4px 0px #000;
+  z-index: 10;
+}
+
+.hud-val {
+  color: #fff;
+}
+
+.coin-icon {
+  display: inline-block;
+  width: 14px;
+  height: 20px;
+  background: #f7d000;
+  border: 3px solid #000;
+  margin-right: 8px;
+}
+
+/* Cartel Banner Rojo NES 'RIO DE AYER' */
+.title-banner {
+  position: absolute;
+  top: 110px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 780px;
+  height: 230px;
+  background: #d82800;
+  border: 8px solid #000;
+  box-shadow: 12px 12px 0px #000;
+  padding: 16px;
+  text-align: center;
+  z-index: 10;
+}
+
+.banner-inner {
+  border: 6px solid #f7d000;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  background: #d82800;
+}
+
+.banner-inner h1 {
+  font-size: 64px;
+  color: #fce0a8;
+  text-shadow: 6px 6px 0px #000, -3px -3px 0px #801000;
+  letter-spacing: 2px;
+  margin-bottom: 5px;
+}
+
+.banner-inner h2 {
+  font-size: 72px;
+  color: #fce0a8;
+  text-shadow: 6px 6px 0px #000, -3px -3px 0px #801000;
+  letter-spacing: 4px;
+}
+
+.copyright {
+  position: absolute;
+  bottom: -35px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 16px;
+  color: #000;
+  white-space: nowrap;
+}
+
+/* Menú de Opciones */
+.menu-container {
+  position: absolute;
+  top: 390px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  font-size: 20px;
+  text-shadow: 4px 4px 0px #000;
+  z-index: 10;
+  width: 650px;
+}
+
+.menu-option {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.cursor-icon {
+  width: 20px;
+  height: 20px;
+  background-color: #d82800;
+  border: 3px solid #000;
+  border-radius: 4px;
+  animation: blink 0.8s steps(2) infinite;
+}
+
+.cursor-spacer {
+  width: 20px;
+}
+
+.top-score {
+  margin-top: 10px;
+  text-align: center;
+}
+
+/* Escenario y Suelo NES */
+.stage {
+  position: absolute;
+  bottom: 0;
+  width: 100%;
+  height: 200px;
+  z-index: 5;
+}
+
+.brick-ground {
+  position: absolute;
+  bottom: 0;
+  width: 100%;
+  height: 80px;
+  background-color: #c84c0c;
+  border-top: 6px solid #000;
+  background-image: 
+    linear-gradient(335deg, #000 23px, transparent 23px),
+    linear-gradient(155deg, #000 23px, transparent 23px);
+  background-size: 58px 58px;
+}
+
+/* Colina verde retro */
+.hill-left {
+  position: absolute;
+  bottom: 80px;
+  left: 60px;
+  width: 220px;
+  height: 90px;
+  background: #00a800;
+  border: 6px solid #000;
+  border-top-left-radius: 110px;
+  border-top-right-radius: 110px;
+  border-bottom: none;
+}
+
+.bush-right {
+  position: absolute;
+  bottom: 80px;
+  right: 100px;
+  width: 160px;
+  height: 60px;
+  background: #88d800;
+  border: 6px solid #000;
+  border-top-left-radius: 80px;
+  border-top-right-radius: 80px;
+  border-bottom: none;
+}
+
+/* Desfile de Personajes */
+.band-parade {
+  position: absolute;
+  bottom: 80px;
+  left: 0px;
+  display: flex;
+  gap: 70px;
+  animation: walkThrough 10s linear infinite;
+  z-index: 6;
+}
+
+.sprite {
+  position: relative;
+  width: 36px;
+  height: 52px;
+}
+
+.s-head {
+  width: 28px;
+  height: 24px;
+  background: #fcb088;
+  border: 3px solid #000;
+  position: absolute;
+  top: 0; left: 4px;
+}
+
+.s-body {
+  width: 32px;
+  height: 20px;
+  border: 3px solid #000;
+  position: absolute;
+  top: 20px; left: 2px;
+}
+
+.guitarrista .s-body { background: #e40058; }
+.dibujante .s-body { background: #008888; }
+.escritor .s-body { background: #f85800; }
+
+.s-leg {
+  width: 10px;
+  height: 16px;
+  background: #688820;
+  border: 2px solid #000;
+  position: absolute;
+  bottom: -12px;
+}
+
+.leg-l { left: 4px; animation: legMove 0.25s steps(2) infinite alternate; }
+.leg-r { right: 4px; animation: legMove 0.25s steps(2) infinite alternate-reverse; }
+
+/* Objetos / Instrumentos */
+.s-item {
+  position: absolute;
+  border: 2px solid #000;
+}
+
+.guitarra {
+  width: 36px; height: 10px;
+  background: #f8b800;
+  top: 22px; left: -8px;
+  transform: rotate(-15deg);
+}
+
+.pincel {
+  width: 38px; height: 8px;
+  background: #fc0000;
+  top: 20px; left: -6px;
+  transform: rotate(-30deg);
+}
+
+.lapicera {
+  width: 40px; height: 8px;
+  background: #004088;
+  top: 20px; left: -8px;
+  transform: rotate(-25deg);
+}
+
+/* Animaciones NES */
+@keyframes walkThrough {
+  0% { 
+    transform: translateX(-400px);
+  }
+  100% { 
+    transform: translateX(1380px);
+  }
+}
+
+@keyframes legMove {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(-6px); }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* Comentado para permitir reproducción en el Studio */
+/* *, *::before, *::after {
+  animation-play-state: paused !important;
+} */

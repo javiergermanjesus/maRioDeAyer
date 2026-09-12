@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Rio de Ayer - NES Title Screen</title>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+</head>
+<body style="margin: 0; padding: 0; background: #000;">
+  <!-- Se agrega data-duration="10" para activar la línea de tiempo en HyperFrames -->
+  <div data-hf-id="hf-c1fz" id="retro-composition" data-composition-id="index" data-width="1280" data-height="720" data-duration="10" class="nes-screen">
+    <!-- Efecto CRT Scanlines -->
+    <div data-hf-id="hf-8pzc" class="scanlines"></div>
+    
+    <!-- HUD Superior Clásico NES -->
+    <div data-hf-id="hf-sqyi" class="nes-hud">
+      <div data-hf-id="hf-4tty">RIO<br data-hf-id="hf-x5px"><span data-hf-id="hf-zqpy" class="hud-val">000000</span></div>
+      <div data-hf-id="hf-1p8o"><span data-hf-id="hf-38xk" class="coin-icon"></span>x00</div>
+      <div data-hf-id="hf-xhdw">WORLD<br data-hf-id="hf-rsrt"><span data-hf-id="hf-mnjf" class="hud-val">1-1</span></div>
+      <div data-hf-id="hf-nzq1">TIME<br data-hf-id="hf-szow"><span data-hf-id="hf-ogxj" class="hud-val">300</span></div>
+    </div>
+
+    <!-- Logo / Cartel Rojo 'RIO DE AYER' -->
+    <div data-hf-id="hf-ypux" class="title-banner">
+      <div data-hf-id="hf-93nt" class="banner-inner">
+        <h1 data-hf-id="hf-60of">RIO DE</h1>
+        <h2 data-hf-id="hf-8a2a">AYER</h2>
+      </div>
+      <div data-hf-id="hf-sdmq" class="copyright">©2026 RIO DE AYER</div>
+    </div>
+
+    <!-- Menú de Selección de Jugadores -->
+    <div data-hf-id="hf-7c7z" class="menu-container">
+      <div data-hf-id="hf-oajl" class="menu-option active">
+        <span data-hf-id="hf-l7yb" class="cursor-icon"></span>
+        <span data-hf-id="hf-24dd">1 PLAYER GAME (GUITARRA)</span>
+      </div>
+      <div data-hf-id="hf-b32x" class="menu-option">
+        <span data-hf-id="hf-4szo" class="cursor-spacer"></span>
+        <span data-hf-id="hf-qun8">2 PLAYER GAME (BAJO)</span>
+      </div>
+      <div data-hf-id="hf-h5pp" class="menu-option">
+        <span data-hf-id="hf-osn0" class="cursor-spacer"></span>
+        <span data-hf-id="hf-wfw5">3 PLAYER GAME (LAPICERA)</span>
+      </div>
+      
+      <div data-hf-id="hf-mh32" class="top-score">TOP- 000000</div>
+    </div>
+
+    <!-- Fondo de Nivel: Colinas y Suelo de Ladrillos -->
+    <div data-hf-id="hf-tan6" class="stage">
+      <div data-hf-id="hf-fbmk" class="hill hill-left"></div>
+      <div data-hf-id="hf-ta09" class="bush bush-right"></div>
+      <div data-hf-id="hf-vqlt" class="brick-ground"></div>
+
+      <!-- Los 3 Músicos caminando entrando y saliendo -->
+      <div data-hf-id="hf-tt75" class="band-parade">
+        <!-- 1. Guitarrista -->
+        <div data-hf-id="hf-chpe" class="sprite guitarrista">
+          <div data-hf-id="hf-ql4q" class="s-head"></div>
+          <div data-hf-id="hf-jxzk" class="s-body"></div>
+          <div data-hf-id="hf-8txu" class="s-item guitarra"></div>
+          <div data-hf-id="hf-ipp3" class="s-leg leg-l"></div>
+          <div data-hf-id="hf-ev2h" class="s-leg leg-r"></div>
+        </div>
+
+        <!-- 2. Dibujante (Pincel/Lápiz) -->
+        <div data-hf-id="hf-9srn" class="sprite dibujante">
+          <div data-hf-id="hf-jztq" class="s-head"></div>
+          <div data-hf-id="hf-twa0" class="s-body"></div>
+          <div data-hf-id="hf-8kv4" class="s-item pincel"></div>
+          <div data-hf-id="hf-a653" class="s-leg leg-l"></div>
+          <div data-hf-id="hf-um65" class="s-leg leg-r"></div>
+        </div>
+
+        <!-- 3. Lapicera -->
+        <div data-hf-id="hf-h15i" class="sprite escritor">
+          <div data-hf-id="hf-ke4r" class="s-head"></div>
+          <div data-hf-id="hf-spcx" class="s-body"></div>
+          <div data-hf-id="hf-5yz8" class="s-item lapicera"></div>
+          <div data-hf-id="hf-9ru2" class="s-leg leg-l"></div>
+          <div data-hf-id="hf-vt38" class="s-leg leg-r"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    window.__timelines = window.__timelines || {};
+    window.__timelines['index'] = {
+      duration: 10,
+      fps: 30
+    };
+  </script>
+</body>
+</html>

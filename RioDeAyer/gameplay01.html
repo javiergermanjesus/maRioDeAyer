@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Rio de Ayer - Gameplay 01</title>
+  <link rel="stylesheet" href="gameplay01.css">
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+</head>
+<body style="margin: 0; padding: 0; background: #000;">
+  <div
+    data-hf-id="gp01-root"
+    id="gameplay01-composition"
+    data-composition-id="gameplay01"
+    data-start="0"
+    data-width="1280"
+    data-height="720"
+    data-duration="10"
+    data-fps="30"
+    data-no-timeline
+    class="nes-screen"
+  >
+    <section
+      data-hf-id="gp01-scene"
+      id="gameplay01-scene"
+      class="clip gameplay-scene"
+      data-start="0"
+      data-duration="10"
+      data-track-index="1"
+    >
+      <div data-hf-id="gp01-hills" class="parallax-strip hills-strip" aria-hidden="true">
+        <div class="landscape-tile">
+          <div class="hill hill-a"></div>
+          <div class="hill hill-b"></div>
+        </div>
+        <div class="landscape-tile">
+          <div class="hill hill-a"></div>
+          <div class="hill hill-b"></div>
+        </div>
+      </div>
+
+      <div data-hf-id="gp01-bushes" class="parallax-strip bushes-strip" aria-hidden="true">
+        <div class="landscape-tile">
+          <div class="bush bush-a"></div>
+          <div class="bush bush-b"></div>
+        </div>
+        <div class="landscape-tile">
+          <div class="bush bush-a"></div>
+          <div class="bush bush-b"></div>
+        </div>
+      </div>
+
+      <div data-hf-id="gp01-obstacles" class="parallax-strip obstacle-strip" aria-hidden="true">
+        <div class="landscape-tile">
+          <div data-hf-id="gp01-obstacle-bush" class="bush obstacle-bush"></div>
+          <div data-hf-id="gp01-question-block" class="question-block">?</div>
+        </div>
+        <div class="landscape-tile">
+          <div class="bush obstacle-bush"></div>
+          <div class="question-block">?</div>
+        </div>
+      </div>
+
+      <div data-hf-id="gp01-ground" class="parallax-strip ground-strip" aria-hidden="true">
+        <div class="brick-ground"></div>
+        <div class="brick-ground"></div>
+      </div>
+
+      <div data-hf-id="gp01-player" class="sprite guitarrista player" data-layout-allow-overflow aria-label="Personaje caminando hacia la derecha">
+        <div data-hf-id="gp01-head" class="s-head"></div>
+        <div data-hf-id="gp01-body" class="s-body"></div>
+        <div data-hf-id="gp01-leg-left" class="s-leg leg-l"></div>
+        <div data-hf-id="gp01-leg-right" class="s-leg leg-r"></div>
+      </div>
+
+      <div data-hf-id="gp01-hud" class="nes-hud">
+        <div data-hf-id="gp01-score">RIO<br data-hf-id="gp01-score-break"><span data-hf-id="gp01-score-value" class="hud-val">000000</span></div>
+        <div data-hf-id="gp01-coins"><span data-hf-id="gp01-coin-icon" class="coin-icon"></span>x00</div>
+        <div data-hf-id="gp01-world">WORLD<br data-hf-id="gp01-world-break"><span data-hf-id="gp01-world-value" class="hud-val">1-1</span></div>
+        <div data-hf-id="gp01-time">TIME<br data-hf-id="gp01-time-break"><span data-hf-id="gp01-time-value" class="hud-val">300</span></div>
+      </div>
+
+      <div data-hf-id="gp01-debug-panel" id="gp01-debug-panel" class="physics-debug" aria-label="Diagnóstico de física"></div>
+      <div data-hf-id="gp01-debug-player-hitbox" id="gp01-debug-player-hitbox" class="debug-hitbox debug-player-hitbox"></div>
+      <div data-hf-id="gp01-debug-block-hitbox" id="gp01-debug-block-hitbox" class="debug-hitbox debug-block-hitbox"></div>
+
+      <div data-hf-id="gp01-scanlines" class="scanlines"></div>
+    </section>
+  </div>
+
+  <script>
+    (() => {
+      const FPS = 30;
+      const DURATION = 10;
+      const FRAME_COUNT = FPS * DURATION;
+      const DT = 1 / FPS;
+
+      const player = document.querySelector('[data-hf-id="gp01-player"]');
+      const obstacle = document.querySelector('[data-hf-id="gp01-obstacle-bush"]');
+      const block = document.querySelector('[data-hf-id="gp01-question-block"]');
+      const scene = document.querySelector('.gameplay-scene');
+      const debugPanel = document.getElementById('gp01-debug-panel');
+      const debugPlayerHitbox = document.getElementById('gp01-debug-player-hitbox');
+      const debugBlockHitbox = document.getElementById('gp01-debug-block-hitbox');
+
+      const positionInScene = (element, axis) => {
+        let position = 0;
+        let node = element;
+
+        while (node && node !== scene) {
+          position += axis === 'x' ? node.offsetLeft : node.offsetTop;
+          node = node.offsetParent;
+        }
+
+        return position;
+      };
+
+      const PLAYER_X = positionInScene(player, 'x');
+      const PLAYER_WIDTH = player.offsetWidth;
+      const PLAYER_HEAD_TOP = positionInScene(player, 'y');
+      const OBSTACLE_START_X = positionInScene(obstacle, 'x');
+      const OBSTACLE_WIDTH = obstacle.offsetWidth;
+      const BLOCK_START_X = positionInScene(block, 'x');
+      const BLOCK_WIDTH = block.offsetWidth;
+      const BLOCK_UNDERSIDE_Y = positionInScene(block, 'y') + block.offsetHeight;
+      const WORLD_SPEED = 128;
+
+      const JUMP_VELOCITY = -560;
+      const GRAVITY = 1600;
+      const TRIGGER_DISTANCE = 12;
+
+      let y = 0;
+      let velocityY = 0;
+      let airborne = false;
+      let jumpStarted = false;
+      let blockHit = false;
+      const frames = [];
+      const physicsStates = [];
+
+      for (let frame = 0; frame <= FRAME_COUNT; frame += 1) {
+        let collisionQuestion = false;
+        const time = frame * DT;
+        const obstacleLeft = OBSTACLE_START_X - WORLD_SPEED * time;
+        const obstacleRight = obstacleLeft + OBSTACLE_WIDTH;
+        const obstacleIsApproaching =
+          obstacleLeft <= PLAYER_X + PLAYER_WIDTH + TRIGGER_DISTANCE &&
+          obstacleRight >= PLAYER_X;
+
+        if (!jumpStarted && obstacleIsApproaching) {
+          velocityY = JUMP_VELOCITY;
+          airborne = true;
+          jumpStarted = true;
+        }
+
+        if (airborne) {
+          const previousY = y;
+          const previousHeadTop = PLAYER_HEAD_TOP + previousY;
+
+          y += velocityY * DT;
+          velocityY += GRAVITY * DT;
+
+          const blockLeft = BLOCK_START_X - WORLD_SPEED * time;
+          const blockRight = blockLeft + BLOCK_WIDTH;
+          const headTop = PLAYER_HEAD_TOP + y;
+          const horizontalBlockContact =
+            PLAYER_X < blockRight && PLAYER_X + PLAYER_WIDTH > blockLeft;
+          const crossedBlockUnderside =
+            !blockHit &&
+            velocityY < 0 &&
+            horizontalBlockContact &&
+            previousHeadTop >= BLOCK_UNDERSIDE_Y &&
+            headTop <= BLOCK_UNDERSIDE_Y;
+
+          if (crossedBlockUnderside) {
+            y = BLOCK_UNDERSIDE_Y - PLAYER_HEAD_TOP;
+            velocityY = 0;
+            blockHit = true;
+            collisionQuestion = true;
+          }
+
+          if (y >= 0 && velocityY > 0) {
+            y = 0;
+            velocityY = 0;
+            airborne = false;
+          }
+        }
+
+        frames.push({
+          offset: frame / FRAME_COUNT,
+          transform: `translateY(${y.toFixed(4)}px)`
+        });
+        physicsStates.push({
+          frame,
+          y,
+          velocityY,
+          jumping: airborne,
+          collisionQuestion
+        });
+      }
+
+      const physicsAnimation = player.animate(frames, {
+        duration: DURATION * 1000,
+        iterations: 1,
+        fill: 'both',
+        easing: 'linear'
+      });
+
+      physicsAnimation.pause();
+      physicsAnimation.currentTime = 0;
+
+      debugPlayerHitbox.style.left = `${PLAYER_X}px`;
+      debugPlayerHitbox.style.top = `${PLAYER_HEAD_TOP}px`;
+      debugPlayerHitbox.style.width = `${PLAYER_WIDTH}px`;
+      debugPlayerHitbox.style.height = `${player.offsetHeight}px`;
+      debugBlockHitbox.style.left = `${BLOCK_START_X}px`;
+      debugBlockHitbox.style.top = `${BLOCK_UNDERSIDE_Y - block.offsetHeight}px`;
+      debugBlockHitbox.style.width = `${BLOCK_WIDTH}px`;
+      debugBlockHitbox.style.height = `${block.offsetHeight}px`;
+
+      const showDebugAt = (time) => {
+        const frame = Math.max(0, Math.min(FRAME_COUNT, Math.round(time * FPS)));
+        const state = physicsStates[frame];
+        const sceneRect = scene.getBoundingClientRect();
+        const visualY = player.getBoundingClientRect().top - sceneRect.top - PLAYER_HEAD_TOP;
+        const waapiTime = physicsAnimation.currentTime;
+
+        debugPanel.textContent =
+          `frame: ${state.frame}  playerY: ${state.y.toFixed(2)}  vy: ${state.velocityY.toFixed(2)}  ` +
+          `jumping: ${state.jumping}  collisionQuestion: ${state.collisionQuestion}\n` +
+          `waapiTime: ${waapiTime === null ? 'null' : waapiTime.toFixed(2)}ms  visualY: ${visualY.toFixed(2)}`;
+        debugPlayerHitbox.style.transform = `translateY(${state.y.toFixed(4)}px)`;
+        debugBlockHitbox.style.transform = `translateX(${(-WORLD_SPEED * time).toFixed(4)}px)`;
+      };
+
+      window.addEventListener('hf-seek', (event) => {
+        showDebugAt(event.detail.time);
+      });
+
+      showDebugAt(0);
+    })();
+  </script>
+</body>
+</html>
