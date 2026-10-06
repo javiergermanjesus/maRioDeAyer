@@ -47,17 +47,19 @@ test('walk, gradual run, max speed, braking and both physical Shift keys', () =>
     const s = setup();
     s.keys.D.isDown = true;
     s.tick();
-    assert.equal(s.player.body.velocity.x, 280);
+    assert.ok(s.player.body.velocity.x > 0 && s.player.body.velocity.x < 280);
     assert.equal(s.movementState, 'walk');
+    s.tick(12);
+    assert.equal(s.player.body.velocity.x, 280);
     s.onShiftDown({ code });
     s.tick();
-    assert.ok(s.player.body.velocity.x > 280 && s.player.body.velocity.x < 460);
+    assert.ok(s.player.body.velocity.x > 280 && s.player.body.velocity.x < 400);
     s.tick(60);
-    assert.equal(s.player.body.velocity.x, 460);
+    assert.equal(s.player.body.velocity.x, 400);
     assert.equal(s.player.animation, 'mario-run');
     s.keys.D.isDown = false;
     s.tick();
-    assert.ok(s.player.body.velocity.x > 0 && s.player.body.velocity.x < 460);
+    assert.ok(s.player.body.velocity.x > 0 && s.player.body.velocity.x < 400);
     s.tick(120);
     assert.equal(s.player.body.velocity.x, 0);
     assert.equal(s.movementState, 'idle');
@@ -69,6 +71,32 @@ test('walk, gradual run, max speed, braking and both physical Shift keys', () =>
   assert.equal(s.readMovementInput().run, true);
   s.onShiftUp({ code: 'ShiftRight' });
   assert.equal(s.readMovementInput().run, false);
+});
+
+test('short grounded taps travel much less while held walking and airborne control retain speed', () => {
+  for (const direction of [-1, 1]) {
+    const s = setup();
+    const arrow = direction < 0 ? s.cursors.left : s.cursors.right;
+    const dt = 1 / 60;
+    arrow.isDown = true;
+    s.tick(1);
+    let distance = Math.abs(s.player.body.velocity.x) * dt;
+    arrow.isDown = false;
+    for (let frame = 0; frame < 60; frame++) {
+      s.tick();
+      distance += Math.abs(s.player.body.velocity.x) * dt;
+    }
+    // Previously even a one-frame tap coasted for roughly 56 world pixels.
+    assert.ok(distance < 2, `one-frame tap moved ${distance} pixels`);
+    assert.equal(s.player.body.velocity.x, 0);
+    arrow.isDown = true;
+    s.tick(60);
+    assert.equal(s.player.body.velocity.x, direction * 280);
+    s.player.body.blocked.down = false;
+    s.player.body.velocity.x = 0;
+    s.tick();
+    assert.equal(s.player.body.velocity.x, direction * 280);
+  }
 });
 
 test('slide locks direction and jump, decelerates to crouch, and consumes jump edges', () => {
@@ -123,12 +151,12 @@ test('slide continues after release; slow crouching stays still', () => {
   }
 });
 
-test('no aerial crouch/slide or queued landing slide; jump impulse is unchanged', () => {
+test('no aerial crouch/slide or queued landing slide; normal jump uses lower impulse', () => {
   const s = setup();
   s.keys.SPACE.edge = true;
   s.tick();
   assert.equal(s.movementState, 'jump');
-  assert.equal(s.player.body.velocity.y, -760);
+  assert.equal(s.player.body.velocity.y, -650);
   s.player.body.blocked.down = false;
   s.player.body.velocity.x = 460;
   s.keys.S.isDown = s.keys.S.edge = true;
@@ -175,4 +203,35 @@ test('acceleration and friction are independent of frame rate', () => {
   for (const fps of [30, 120]) {
     simulate(fps).forEach((speed, i) => assert.ok(Math.abs(speed - reference[i]) < 0.00001));
   }
+});
+
+test('high jump requires Shift and actual near-running speed in either direction', () => {
+  for (const direction of [-1, 1]) {
+    for (const fps of [30, 60, 120]) {
+      for (const [speed, shift, expected] of [
+        [0, false, -650], [0, true, -650],
+        [280, false, -650], [280, true, -650],
+        [320, true, -650], [360, true, -760],
+        [400, true, -760], [400, false, -650],
+      ]) {
+        const s = setup();
+        s.player.body.velocity.x = direction * speed;
+        s.keys[direction === 1 ? 'D' : 'A'].isDown = true;
+        if (shift) s.onShiftDown({ code: 'ShiftLeft' });
+        s.keys.SPACE.edge = true;
+        s.tick(1, 1000 / fps);
+        assert.equal(s.player.body.velocity.y, expected,
+          `speed=${speed}, Shift=${shift}, direction=${direction}, fps=${fps}`);
+        assert.equal(s.player.frame, 'jump');
+        // Pressing jump again in the air must not upgrade or reapply the impulse.
+        s.player.body.blocked.down = false;
+        s.player.body.velocity.y = -200;
+        s.keys.SPACE.edge = true;
+        s.tick(1, 1000 / fps);
+        assert.equal(s.player.body.velocity.y, -200);
+      }
+    }
+  }
+  const heightRatio = (650 / 760) ** 2;
+  assert.ok(heightRatio >= 0.7 && heightRatio <= 0.75);
 });
