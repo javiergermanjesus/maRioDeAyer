@@ -150,9 +150,12 @@ test('Game Over accepts a fresh Enter or Space edge and ignores held keys', () =
   }
 });
 
-test('create rebuilds six hongos, two walking turtles and four unused blocks', () => {
+test('create rebuilds nine hongos, four walking turtles and fifteen unused blocks', () => {
+  context.BrickSystem = class {
+    constructor() { this.group = {}; this.remaining = 31; }
+  };
   context.CoinSystem = class {
-    constructor() { this.remaining = 22; }
+    constructor() { this.remaining = 41; }
   };
   context.Phaser.Core = { Events: { BLUR: 'blur' } };
   context.Phaser.Scenes = { Events: { SHUTDOWN: 'shutdown', PRE_RENDER: 'prerender' } };
@@ -198,6 +201,10 @@ test('create rebuilds six hongos, two walking turtles and four unused blocks', (
   const oldEnemies = scene.enemies;
   const oldBlocks = scene.powerUps;
   const oldCoins = scene.coinSystem;
+  const oldBricks = scene.bricks;
+  oldBricks.remaining = 0;
+  scene.collectPowerUp({ type: 'white-mushroom' });
+  assert.equal(scene.powered, true);
   oldCoins.remaining = 0;
   oldEnemies.spawns[0].enemyState = 'flat';
   oldEnemies.spawns[6].enemyState = 'sliding';
@@ -210,20 +217,24 @@ test('create rebuilds six hongos, two walking turtles and four unused blocks', (
   assert.equal(scene.lives, 2);
   assert.equal(scene.coins, 47);
   assert.notEqual(scene.coinSystem, oldCoins);
-  assert.equal(scene.coinSystem.remaining, 22);
+  assert.equal(scene.coinSystem.remaining, 41);
   assert.equal(scene.dead, false);
+  assert.equal(scene.powered, false);
+  assert.notEqual(scene.bricks, oldBricks);
+  assert.equal(scene.bricks.remaining, 31);
   assert.notEqual(scene.player, oldPlayer);
   assert.equal(scene.player.x, 378);
   assert.equal(scene.player.y, 608);
   assert.notEqual(scene.enemies, oldEnemies);
-  assert.equal(scene.enemies.spawns.length, 8);
-  assert.deepEqual(Array.from(scene.enemies.spawns.slice(6), e => e.x), [880, 3280]);
+  assert.equal(scene.enemies.spawns.length, 13);
+  assert.deepEqual(Array.from(scene.enemies.spawns.filter(e => e.enemyType === 'tortuga'), e => e.x),
+    [2830, 3280, 5460, 6320]);
   assert.equal(scene.enemies.spawns[6].direction, -1);
   assert.equal(scene.enemies.spawns[7].direction, 1);
   assert.ok(scene.enemies.spawns.every(enemy => enemy.enemyState === 'walking'));
-  assert.equal(scene.enemies.spawns[0].x, 720);
-  assert.equal(scene.powerUps.length, 4);
+  assert.equal(scene.enemies.spawns[0].x, 1140);
+  assert.equal(scene.powerUps.length, 15);
   assert.ok(scene.powerUps.every((block, i) => block !== oldBlocks[i] && block.state === 'ready'));
-  assert.equal(scene.powerUps.filter(block => block.hasMushroom).length, 1);
+  assert.equal(scene.powerUps.filter(block => block.hasMushroom).length, 2);
   assert.equal(scene.powerUps[0].x, 560);
 });

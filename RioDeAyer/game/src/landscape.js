@@ -175,7 +175,8 @@ export function makeLandscape(scene, { width, height, worldWidth, groundY, gaps,
       branch(c, '#714725', x + dx, y + 8, x + dx - 2, y + 14, 1);
     }
   }
-  for (const worldX of [96, 624, 1464, 2320, 3320, 4020, 4296]) {
+  for (const worldX of [96, 624, 1464, 2320, 3320, 4020, 4296,
+    4504, 4770, 5008, 5270, 5598, 5880, 6160, 6420, 6656]) {
     const x = worldX / 2, y = groundY / 2;
     for (let i = 0; i < 9; i++) {
       const dx = (i - 4) * 2;
@@ -183,7 +184,7 @@ export function makeLandscape(scene, { width, height, worldWidth, groundY, gaps,
       branch(c, '#29462a', x, y - 1, x + dx, top, 2);
       branch(c, i % 2 ? '#769033' : '#a4ac42', x, y - 1, x + dx, top, 1);
     }
-    if (worldX === 96 || worldX === 4020) {
+    if (worldX === 96 || worldX === 4020 || worldX === 5270 || worldX === 6656) {
       for (let i = 0; i < 3; i++) {
         branch(c, '#506b30', x + i * 4, y, x + i * 4 - 2, y - 21 - i * 3, 1);
         ink(c, '#694a29', x + i * 4 - 3, y - 25 - i * 3, 2, 6);

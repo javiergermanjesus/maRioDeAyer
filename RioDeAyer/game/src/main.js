@@ -5,33 +5,71 @@ import marioUrl from '../assets/mario-sprites-grid.png';
 import { EnemySystem, preloadEnemies } from './enemies.js';
 import { PowerUpSystem, preloadPowerUps } from './powerups.js';
 import { CoinSystem, preloadCoins } from './coins.js';
+import { BrickSystem } from './bricks.js';
 
 const WIDTH = 1280;
 const HEIGHT = 720;
-const WORLD_WIDTH = WIDTH * 3.5;
+const ORIGINAL_WORLD_WIDTH = WIDTH * 3.5;
+const WORLD_WIDTH = ORIGINAL_WORLD_WIDTH * 1.5;
 const GROUND_Y = 640;
 const VIEW_ZOOM = 1.6;
-// Later patrols sit between existing obstacles so they cannot wander into a river
-// before the player reaches them. The final pair shares the same clear stretch.
-const ENEMY_SPAWNS = [720, 1140, 1490, 2650, 2940, 3010];
+// The first bank contains the first patrol, keeping the opening peaceful even
+// when the player waits. Introduce single mushrooms before pairs and turtles.
+const ENEMY_SPAWNS = [1140, 1490, 1560, 2650, 2940, 3010];
+const TURTLE_SPAWNS = [
+  { x: 2830, groundY: 552, direction: -1 },
+  { x: 3280, groundY: GROUND_Y, direction: 1 },
+];
+// Ground patrols are contained by raised surfaces. Turtles patrol platform tops,
+// leaving the landing banks and the approach to each river gap clear.
+const EXTENSION_HONGO_SPAWNS = [4800, 5570, 6500];
+const EXTENSION_TURTLE_SPAWNS = [
+  { x: 5460, groundY: 568, direction: 1 },
+  { x: 6320, groundY: 592, direction: -1 },
+];
 const QUESTION_BLOCKS = [
   { x: 560, topY: 488, hasMushroom: true },
   { x: 1490, topY: 488, hasMushroom: false, hasCoin: true },
   { x: 2340, topY: 488, hasMushroom: false },
   { x: 3930, topY: 488, hasMushroom: false, hasCoin: true },
+  { x: 4560, topY: 488, hasMushroom: false, hasCoin: true },
+  { x: 5580, topY: 488, hasMushroom: true },
+  { x: 6200, topY: 488, hasMushroom: false, hasCoin: true },
+  // Idle artwork and solid bodies are 33 px wide: equal spacing joins the row.
+  // Opening rewards, a later quiet reward area, then a higher pair before water.
+  { x: 740, topY: 488, hasMushroom: false, hasCoin: true },
+  { x: 773, topY: 488, hasMushroom: false },
+  { x: 806, topY: 488, hasMushroom: false, hasCoin: true },
+  { x: 4120, topY: 488, hasMushroom: false, hasCoin: true },
+  { x: 4153, topY: 488, hasMushroom: false, hasCoin: true },
+  { x: 4186, topY: 488, hasMushroom: false },
+  { x: 5840, topY: 472, hasMushroom: false },
+  { x: 5873, topY: 472, hasMushroom: false, hasCoin: true },
 ];
 // One geometry source for both artwork and solid Arcade bodies.
-const RIVER_GAPS = [{ x: 2040, width: 112 }, { x: 3540, width: 152 }];
+const RIVER_GAPS = [
+  { x: 2040, width: 112 }, { x: 3540, width: 152 },
+  { x: 5080, width: 128 }, { x: 5980, width: 144 },
+];
 const LEVEL_SURFACES = [
   { x: 0, y: GROUND_Y, width: 2040, height: 80, kind: 'bank' },
   { x: 2152, y: GROUND_Y, width: 1388, height: 80, kind: 'bank' },
-  { x: 3692, y: GROUND_Y, width: WORLD_WIDTH - 3692, height: 80, kind: 'bank' },
+  { x: 3692, y: GROUND_Y, width: ORIGINAL_WORLD_WIDTH - 3692, height: 80, kind: 'bank' },
   { x: 960, y: 600, width: 120, height: 40, kind: 'bank' },
   { x: 1240, y: 568, width: 144, height: 72, kind: 'bank' },
   { x: 1656, y: 584, width: 144, height: 56, kind: 'log' },
   { x: 2480, y: 592, width: 128, height: 48, kind: 'bank' },
   { x: 2760, y: 552, width: 144, height: 88, kind: 'bank' },
   { x: 3060, y: 584, width: 128, height: 56, kind: 'bank' },
+  // Append after the original boundary; its geometry and artwork stay intact.
+  { x: ORIGINAL_WORLD_WIDTH, y: GROUND_Y, width: 600, height: 80, kind: 'bank' },
+  { x: 5208, y: GROUND_Y, width: 772, height: 80, kind: 'bank' },
+  { x: 6124, y: GROUND_Y, width: WORLD_WIDTH - 6124, height: 80, kind: 'bank' },
+  { x: 4620, y: 592, width: 128, height: 48, kind: 'bank' },
+  { x: 4840, y: 584, width: 144, height: 56, kind: 'log' },
+  { x: 5390, y: 568, width: 144, height: 72, kind: 'bank' },
+  { x: 5650, y: 608, width: 192, height: 32, kind: 'log' },
+  { x: 6250, y: 592, width: 144, height: 48, kind: 'bank' },
 ];
 const MOVEMENT = {
   walkSpeed: 280,
@@ -73,6 +111,7 @@ class Playground extends Phaser.Scene {
 
   create() {
     this.dead = false;
+    this.powered = false;
     this.gameOver = false;
     this.movementState = 'idle';
     this.shiftKeys.clear();
@@ -94,15 +133,23 @@ class Playground extends Phaser.Scene {
     this.playerTerrainCollider = this.physics.add.collider(this.player, this.surfaces);
     this.enemies = new EnemySystem(this, this.player, this.surfaces);
     for (const x of ENEMY_SPAWNS) this.enemies.spawnHongo(x, GROUND_Y);
-    this.enemies.spawnTortuga(880, GROUND_Y);
-    this.enemies.spawnTortuga(3280, GROUND_Y, 1);
+    for (const { x, groundY, direction } of TURTLE_SPAWNS) {
+      this.enemies.spawnTortuga(x, groundY, direction);
+    }
+    for (const x of EXTENSION_HONGO_SPAWNS) this.enemies.spawnHongo(x, GROUND_Y);
+    for (const { x, groundY, direction } of EXTENSION_TURTLE_SPAWNS) {
+      this.enemies.spawnTortuga(x, groundY, direction);
+    }
     this.events.on('enemy-impact', this.die, this);
+    this.events.on('powerup-collected', this.collectPowerUp, this);
     this.coinSystem = new CoinSystem(this, this.player);
     this.powerUps = QUESTION_BLOCKS.map(({ x, topY, hasMushroom, hasCoin }) =>
       new PowerUpSystem(this, this.player, this.surfaces, x, topY, hasMushroom, hasCoin));
+    this.bricks = new BrickSystem(this, this.player);
     // Power-ups can walk across any of the question blocks.
     for (const powerUp of this.powerUps) {
       if (!powerUp.mushroom) continue;
+      powerUp.colliders.push(this.physics.add.collider(powerUp.mushroom, this.bricks.group));
       for (const other of this.powerUps) {
         if (other !== powerUp) powerUp.colliders.push(
           this.physics.add.collider(powerUp.mushroom, other.solid));
@@ -130,6 +177,7 @@ class Playground extends Phaser.Scene {
     this.game.events.on(Phaser.Core.Events.BLUR, this.stopMovement, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.events.off('enemy-impact', this.die, this);
+      this.events.off('powerup-collected', this.collectPowerUp, this);
       this.deathTimer?.remove(false);
       this.game.events.off(Phaser.Core.Events.BLUR, this.stopMovement, this);
       this.input.keyboard.off('keydown', this.onShiftDown, this);
@@ -153,6 +201,10 @@ class Playground extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.events.off(Phaser.Scenes.Events.PRE_RENDER, syncLandscape);
     });
+  }
+
+  collectPowerUp({ type }) {
+    if (!this.dead && type === 'white-mushroom') this.powered = true;
   }
 
   die(cause = 'enemy') {

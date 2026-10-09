@@ -52,7 +52,7 @@ export function isHitFromBelow(player, block) {
   return Math.min(x + player.width, block.right) - Math.max(x, block.x) > 0;
 }
 
-// Independent block/power-up state machine. No player abilities or enemy state changes.
+// Independent block/power-up state machine; the scene handles the collection event.
 export class PowerUpSystem {
   constructor(scene, player, surfaces, x, topY, hasMushroom = true, hasCoin = false) {
     this.scene = scene;

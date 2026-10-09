@@ -104,7 +104,7 @@ test('moving mushroom reverses at solid walls and keeps gravity when leaving a p
   assert.equal(mushroom.body.allowGravity, true);
 });
 
-test('collection only after emergence, once, and without granting any player ability', () => {
+test('collection only after emergence, once, emits the mushroom event for the scene', () => {
   const { system, mushroom, events } = setup();
   system.activate();
   system.collect();
