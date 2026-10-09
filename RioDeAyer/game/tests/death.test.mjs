@@ -150,7 +150,7 @@ test('Game Over accepts a fresh Enter or Space edge and ignores held keys', () =
   }
 });
 
-test('create rebuilds the entire attempt with six live enemies and four unused blocks', () => {
+test('create rebuilds six hongos, two walking turtles and four unused blocks', () => {
   context.CoinSystem = class {
     constructor() { this.remaining = 22; }
   };
@@ -159,6 +159,9 @@ test('create rebuilds the entire attempt with six live enemies and four unused b
   context.EnemySystem = class {
     constructor() { this.spawns = []; }
     spawnHongo(x, y) { this.spawns.push({ x, y, enemyState: 'walking' }); }
+    spawnTortuga(x, y, direction = -1) {
+      this.spawns.push({ x, y, direction, enemyType: 'tortuga', enemyState: 'walking' });
+    }
   };
   context.PowerUpSystem = class {
     constructor(scene, player, surfaces, x, topY, hasMushroom) {
@@ -197,6 +200,8 @@ test('create rebuilds the entire attempt with six live enemies and four unused b
   const oldCoins = scene.coinSystem;
   oldCoins.remaining = 0;
   oldEnemies.spawns[0].enemyState = 'flat';
+  oldEnemies.spawns[6].enemyState = 'sliding';
+  oldEnemies.spawns[7].enemyState = 'shell';
   oldBlocks[0].state = 'collected';
   oldBlocks[1].state = 'used';
   scene.dead = true;
@@ -211,7 +216,10 @@ test('create rebuilds the entire attempt with six live enemies and four unused b
   assert.equal(scene.player.x, 378);
   assert.equal(scene.player.y, 608);
   assert.notEqual(scene.enemies, oldEnemies);
-  assert.equal(scene.enemies.spawns.length, 6);
+  assert.equal(scene.enemies.spawns.length, 8);
+  assert.deepEqual(Array.from(scene.enemies.spawns.slice(6), e => e.x), [880, 3280]);
+  assert.equal(scene.enemies.spawns[6].direction, -1);
+  assert.equal(scene.enemies.spawns[7].direction, 1);
   assert.ok(scene.enemies.spawns.every(enemy => enemy.enemyState === 'walking'));
   assert.equal(scene.enemies.spawns[0].x, 720);
   assert.equal(scene.powerUps.length, 4);

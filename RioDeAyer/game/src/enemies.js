@@ -1,4 +1,5 @@
 import hongoUrl from '../assets/hongo-enemigo.png';
+import tortugaUrl from '../assets/tortuga-sprites-grid.png';
 
 // Measured alpha bounds in the 2172 × 724 source, not a regular grid.
 export const HONGO_REGIONS = [
@@ -9,9 +10,35 @@ export const HONGO_REGIONS = [
 const SPEED = 55;
 const BOUNCE = -360;
 const FLAT_DURATION = 450;
+const TURTLE_SPEED = 48;
+const SHELL_SPEED = 330;
+const SHELL_WAIT = 5000;
+const TURTLE_SCALE = 0.32;
+// Source-pixel body bounds exclude transparent margins; both share a foot baseline.
+export const TURTLE_BODIES = {
+  walking: { width: 148, height: 96, x: 22, y: 40 },
+  shell: { width: 108, height: 84, x: 42, y: 52 },
+};
 
 export function preloadEnemies(scene) {
   scene.load.image('hongo-source', hongoUrl);
+  scene.load.spritesheet('tortuga', tortugaUrl, {
+    frameWidth: 192, frameHeight: 144, endFrame: 14,
+  });
+}
+
+function makeTurtleAnimations(scene) {
+  for (const [name, start, end, frameRate, repeat] of [
+    ['walk-right', 0, 1, 5, -1], ['walk-left', 2, 3, 5, -1],
+    ['hide', 4, 6, 10, 0], ['slide-right', 8, 9, 12, -1],
+    ['slide-left', 10, 11, 12, -1], ['emerge', 12, 13, 5, 0],
+  ]) {
+    const key = `tortuga-${name}`;
+    if (!scene.anims.exists(key)) scene.anims.create({
+      key, frames: scene.anims.generateFrameNumbers('tortuga', { start, end }),
+      frameRate, repeat,
+    });
+  }
 }
 
 function makeHongoTexture(scene) {
@@ -56,6 +83,7 @@ export class EnemySystem {
   constructor(scene, player, surfaces) {
     this.scene = scene;
     this.player = player;
+    this.surfaces = surfaces;
     this.previousContacts = new Set();
     this.contacts = new Set();
     makeHongoTexture(scene);
@@ -63,12 +91,18 @@ export class EnemySystem {
     this.terrainCollider = scene.physics.add.collider(this.group, surfaces);
     this.playerOverlap = scene.physics.add.overlap(player, this.group,
       (_player, enemy) => this.touchPlayer(enemy));
+    this.enemyOverlap = scene.physics.add.overlap(this.group, this.group,
+      (a, b) => this.touchEnemies(a, b));
     scene.events.once('shutdown', () => {
       if (this.terrainCollider.world) this.terrainCollider.destroy();
       if (this.playerOverlap.world) this.playerOverlap.destroy();
+      if (this.enemyOverlap.world) this.enemyOverlap.destroy();
       // Phaser's UpdateList may already have destroyed the group on shutdown.
       if (this.group.scene) {
-        for (const enemy of this.group.getChildren()) enemy.removalTimer?.remove(false);
+        for (const enemy of this.group.getChildren()) {
+          enemy.removalTimer?.remove(false);
+          enemy.stateTimer?.remove(false);
+        }
         this.group.destroy(true);
       }
     });
@@ -85,8 +119,100 @@ export class EnemySystem {
     return enemy;
   }
 
+  spawnTortuga(x, groundY, direction = -1) {
+    makeTurtleAnimations(this.scene);
+    const enemy = this.group.create(x, groundY - 64 * TURTLE_SCALE, 'tortuga', 0);
+    enemy.setScale(TURTLE_SCALE).setCollideWorldBounds(true).setBounce(0);
+    enemy.enemyType = 'tortuga';
+    enemy.direction = direction;
+    this.setTurtleState(enemy, 'walking');
+    return enemy;
+  }
+
+  setTurtleState(enemy, state) {
+    enemy.stateTimer?.remove(false);
+    enemy.stateTimer = null;
+    enemy.enemyState = state;
+    const shape = TURTLE_BODIES[state === 'walking' ? 'walking' : 'shell'];
+    enemy.body.setSize(shape.width, shape.height, false).setOffset(shape.x, shape.y);
+    enemy.body.updateFromGameObject();
+    enemy.setVelocityX(state === 'walking' ? enemy.direction * TURTLE_SPEED
+      : state === 'sliding' ? enemy.direction * SHELL_SPEED : 0);
+    const direction = enemy.direction > 0 ? 'right' : 'left';
+    if (state === 'shell') {
+      enemy.anims.stop();
+      enemy.setFrame(7);
+    } else enemy.play(`tortuga-${state === 'walking' ? `walk-${direction}`
+      : state === 'sliding' ? `slide-${direction}` : state === 'hiding' ? 'hide' : 'emerge'}`, true);
+    const next = { hiding: ['shell', 300], shell: ['emerging', SHELL_WAIT], emerging: ['walking', 400] }[state];
+    if (next) enemy.stateTimer = this.scene.time.delayedCall(next[1], () => {
+      if (enemy.active && enemy.body.enable) this.setTurtleState(enemy, next[0]);
+    });
+  }
+
+  touchTurtle(enemy) {
+    // Ignore the kicker until their hitboxes separate, including a stop/re-kick cycle.
+    if (enemy.kickContact) return;
+    if (isStomp(this.player.body, enemy.body)) {
+      this.setTurtleState(enemy, enemy.enemyState === 'walking' ? 'hiding' : 'shell');
+      enemy.kickContact = true;
+      this.player.setVelocityY(BOUNCE);
+      return;
+    }
+    if (['hiding', 'shell', 'emerging'].includes(enemy.enemyState)) {
+      // A contact from below does not count as a lateral kick.
+      const body = this.player.body;
+      if (body.bottom <= enemy.body.y || body.y >= enemy.body.bottom) return;
+      enemy.direction = body.center.x < enemy.body.center.x ? 1 : -1;
+      enemy.kickContact = true;
+      this.setTurtleState(enemy, 'sliding');
+      return;
+    }
+    this.impactPlayer(enemy);
+  }
+
+  impactPlayer(enemy) {
+    this.contacts.add(enemy);
+    if (!this.previousContacts.has(enemy)) {
+      this.lastImpact = { enemy, player: this.player, time: this.scene.time.now };
+      this.scene.events.emit('enemy-impact', this.lastImpact);
+    }
+  }
+
+  touchEnemies(a, b) {
+    if (a === b || !a.body.enable || !b.body.enable) return;
+    const slidingA = a.enemyState === 'sliding';
+    const slidingB = b.enemyState === 'sliding';
+    if (!slidingA && !slidingB) return;
+    // Simultaneous sliding shells knock each other out; all other targets are eliminated.
+    if (slidingA) this.removeEnemy(b);
+    if (slidingB) this.removeEnemy(a);
+  }
+
+  removeEnemy(enemy) {
+    enemy.stateTimer?.remove(false);
+    enemy.enemyState = 'defeated';
+    enemy.body.enable = false;
+    enemy.setVelocity(0, 0);
+    enemy.anims.stop();
+    enemy.setFrame(enemy.enemyType === 'tortuga' ? 14 : 'flat');
+    enemy.removalTimer = this.scene.time.delayedCall(FLAT_DURATION, () => enemy.destroy());
+  }
+
+  hasGroundAhead(enemy) {
+    const body = enemy.body;
+    const x = enemy.direction > 0 ? body.right + 5 : body.x - 5;
+    return this.surfaces.getChildren().some(surface => {
+      const ground = surface.body;
+      return ground?.enable && x >= ground.x && x <= ground.right
+        && ground.y >= body.bottom - 4 && ground.y <= body.bottom + 8;
+    });
+  }
+
   touchPlayer(enemy) {
-    if (this.scene.dead || enemy.enemyState !== 'walking') return;
+    if (this.scene.dead || !enemy.body.enable) return;
+    if (enemy.enemyType === 'tortuga') return this.touchTurtle(enemy);
+    if (enemy.enemyState !== 'walking') return;
     if (isStomp(this.player.body, enemy.body)) {
       enemy.enemyState = 'flat';
       enemy.anims.stop();
@@ -97,16 +223,30 @@ export class EnemySystem {
       enemy.removalTimer = this.scene.time.delayedCall(FLAT_DURATION, () => enemy.destroy());
       return;
     }
-    this.contacts.add(enemy);
-    if (!this.previousContacts.has(enemy)) {
-      // The scene owns player death; enemy movement and state remain independent.
-      this.lastImpact = { enemy, player: this.player, time: this.scene.time.now };
-      this.scene.events.emit('enemy-impact', this.lastImpact);
-    }
+    this.impactPlayer(enemy);
   }
 
   update() {
     for (const enemy of this.group.getChildren()) {
+      if (enemy.enemyType === 'tortuga') {
+        if (enemy.kickContact) {
+          const a = this.player.body, b = enemy.body;
+          if (a.right <= b.x || a.x >= b.right || a.bottom <= b.y || a.y >= b.bottom) enemy.kickContact = false;
+        }
+        if (['walking', 'sliding'].includes(enemy.enemyState)) {
+          const oldDirection = enemy.direction;
+          if (enemy.body.blocked.left) enemy.direction = 1;
+          else if (enemy.body.blocked.right) enemy.direction = -1;
+          else if (enemy.enemyState === 'walking' && enemy.body.blocked.down && !this.hasGroundAhead(enemy)) enemy.direction *= -1;
+          if (oldDirection !== enemy.direction) this.setTurtleState(enemy, enemy.enemyState);
+          enemy.setVelocityX(enemy.direction * (enemy.enemyState === 'walking' ? TURTLE_SPEED : SHELL_SPEED));
+        }
+        if (enemy.body.bottom >= this.scene.physics.world.bounds.bottom) {
+          enemy.stateTimer?.remove(false);
+          enemy.destroy();
+        }
+        continue;
+      }
       if (enemy.enemyState !== 'walking') continue;
       if (enemy.body.blocked.left) enemy.direction = 1;
       else if (enemy.body.blocked.right) enemy.direction = -1;

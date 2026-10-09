@@ -94,6 +94,8 @@ class Playground extends Phaser.Scene {
     this.playerTerrainCollider = this.physics.add.collider(this.player, this.surfaces);
     this.enemies = new EnemySystem(this, this.player, this.surfaces);
     for (const x of ENEMY_SPAWNS) this.enemies.spawnHongo(x, GROUND_Y);
+    this.enemies.spawnTortuga(880, GROUND_Y);
+    this.enemies.spawnTortuga(3280, GROUND_Y, 1);
     this.events.on('enemy-impact', this.die, this);
     this.coinSystem = new CoinSystem(this, this.player);
     this.powerUps = QUESTION_BLOCKS.map(({ x, topY, hasMushroom, hasCoin }) =>
@@ -279,6 +281,12 @@ class Playground extends Phaser.Scene {
   }
 
   makeHud() {
+    // Temporary diagnostic, rendered only by the existing HUD camera.
+    this.fpsText = this.add.text(WIDTH - 12, HEIGHT - 12, 'FPS: --', {
+      fontFamily: 'monospace', fontSize: '14px', color: '#d0d0d0',
+      backgroundColor: '#000000', padding: { x: 5, y: 3 },
+    }).setOrigin(1, 1).setScrollFactor(0).setDepth(101).setAlpha(0.75);
+    this.nextFpsUpdate = 0;
     const style = {
       fontFamily: 'monospace', fontSize: '28px', fontStyle: 'bold',
       color: '#ffffff', lineSpacing: 5,
@@ -381,6 +389,11 @@ class Playground extends Phaser.Scene {
   }
 
   update(_time, delta) {
+    // Refresh the diagnostic twice per second, including death and Game Over.
+    if (this.fpsText && _time >= this.nextFpsUpdate) {
+      this.fpsText.setText(`FPS: ${Math.round(this.game.loop.actualFps)}`);
+      this.nextFpsUpdate = _time + 500;
+    }
     if (this.gameOver) {
       const restart = [this.keys.ENTER, this.keys.SPACE]
         .map(key => Phaser.Input.Keyboard.JustDown(key)).some(Boolean);

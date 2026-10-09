@@ -9,6 +9,111 @@ vm.runInContext(source.replace(/^import .*;\r?\n/gm, '').replace(/export /g, '')
   + '\nglobalThis.api = { EnemySystem, isStomp };', context);
 const { EnemySystem, isStomp } = context.api;
 
+function turtleSetup(state = 'walking') {
+  const result = setup();
+  const { enemy, player } = result;
+  enemy.active = true;
+  enemy.enemyType = 'tortuga';
+  enemy.enemyState = state;
+  enemy.body.y = 602;
+  enemy.body.right = 136;
+  enemy.body.center = { x: 118 };
+  enemy.body.setSize = function(w, h) { enemy.hitbox = { w, h }; return this; };
+  enemy.body.setOffset = function(x, y) { enemy.offset = { x, y }; return this; };
+  enemy.body.updateFromGameObject = () => {};
+  enemy.play = key => { enemy.animation = key; };
+  player.body.y = 541;
+  player.body.right = 132;
+  player.body.center = { x: 116 };
+  return result;
+}
+
+test('turtle stomp hides, waits five seconds, warns, then walks with a larger body', () => {
+  const { system, enemy, timers, impacts, player } = turtleSetup();
+  system.touchPlayer(enemy);
+  assert.equal(enemy.enemyState, 'hiding');
+  assert.equal(enemy.animation, 'tortuga-hide');
+  assert.equal(player.body.velocity.y, -360);
+  assert.equal(enemy.body.enable, true);
+  assert.equal(enemy.hitbox.w, 108);
+  system.touchPlayer(enemy); // The rebound cannot immediately kick the shell.
+  assert.equal(enemy.enemyState, 'hiding');
+  timers[0].callback();
+  assert.equal(enemy.frame, 7);
+  assert.equal(timers[1].delay, 5000);
+  timers[1].callback();
+  assert.equal(enemy.animation, 'tortuga-emerge');
+  timers[2].callback();
+  assert.equal(enemy.enemyState, 'walking');
+  assert.equal(enemy.hitbox.w, 148);
+  assert.equal(impacts.length, 0);
+});
+
+test('side kicks go away from the player, cancel emergence and ignore lingering kick contact', () => {
+  for (const [x, direction] of [[90, 1], [140, -1]]) {
+    const { system, enemy, player, impacts } = turtleSetup('emerging');
+    let canceled = false;
+    enemy.stateTimer = { remove() { canceled = true; } };
+    player.body.prev.y = 580;
+    player.body.center.x = x;
+    system.touchPlayer(enemy);
+    assert.equal(canceled, true);
+    assert.equal(enemy.enemyState, 'sliding');
+    assert.equal(enemy.speed, direction * 330);
+    system.touchPlayer(enemy);
+    assert.equal(impacts.length, 0);
+    player.body.x = 300;
+    player.body.right = 332;
+    system.update();
+    assert.equal(enemy.kickContact, false);
+    system.touchPlayer(enemy);
+    assert.equal(impacts.length, 1);
+  }
+});
+
+test('stomping a sliding shell stops it; walking and sliding side contacts damage', () => {
+  const { system, enemy, player } = turtleSetup('sliding');
+  system.touchPlayer(enemy);
+  assert.equal(enemy.enemyState, 'shell');
+  assert.equal(enemy.speed, 0);
+  assert.equal(player.body.velocity.y, -360);
+  for (const state of ['walking', 'sliding']) {
+    const result = turtleSetup(state);
+    result.player.body.prev.y = 580;
+    result.system.touchPlayer(result.enemy);
+    assert.equal(result.impacts.length, 1);
+  }
+});
+
+test('sliding shells eliminate hongos and turtles and simultaneous shells defeat each other', () => {
+  for (const state of ['walking', 'shell', 'sliding']) {
+    const { system, enemy: shell } = turtleSetup('sliding');
+    const { enemy: target } = state === 'walking' ? setup() : turtleSetup(state);
+    system.touchEnemies(shell, target);
+    assert.equal(target.enemyState, 'defeated');
+    assert.equal(target.body.enable, false);
+    assert.equal(shell.enemyState, state === 'sliding' ? 'defeated' : 'sliding');
+  }
+});
+
+test('walking turtles turn at platform edges and walls; shells bounce at walls but leave edges', () => {
+  const { system, enemy } = turtleSetup();
+  system.surfaces = { getChildren: () => [{ body: { enable: true, x: 100, right: 140, y: 640 } }] };
+  enemy.body.blocked.down = true;
+  system.update(); // No support to the left of the body.
+  assert.equal(enemy.direction, 1);
+  enemy.body.blocked.right = true;
+  system.update();
+  assert.equal(enemy.direction, -1);
+  enemy.body.blocked = { down: true };
+  system.setTurtleState(enemy, 'sliding');
+  system.update();
+  assert.equal(enemy.speed, -330);
+  enemy.body.blocked.left = true;
+  system.update();
+  assert.equal(enemy.speed, 330);
+});
+
 function setup() {
   const impacts = [];
   const timers = [];
@@ -130,7 +235,7 @@ test('scene shutdown tolerates an enemy group already destroyed by Phaser', () =
   };
   new EnemySystem(scene, {}, {});
   assert.doesNotThrow(() => cleanup());
-  assert.equal(destroyedColliders, 2);
+  assert.equal(destroyedColliders, 3);
   assert.doesNotThrow(() => cleanup());
-  assert.equal(destroyedColliders, 2);
+  assert.equal(destroyedColliders, 3);
 });
