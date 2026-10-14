@@ -86,6 +86,10 @@ Al terminar activa gravedad y avanza a 90 px/s, colisiona con terreno y bloque,
 rebota lateralmente y puede caer de plataformas. Sólo entonces se puede recoger:
 desaparece y emite `powerup-collected`, sin modificar las habilidades de maRio.
 La muerte del jugador impide activaciones y recogidas; reiniciar repone el bloque.
+Para inspeccionar colisiones, F2 alterna las hitboxes de Arcade; también se puede
+iniciar con `?debugPhysics=1`. El modo está desactivado por defecto.
+Las medidas, correcciones y pasos de prueba están en
+[VERIFICACION-COLISIONES.md](VERIFICACION-COLISIONES.md).
 Hay tres bloques adicionales en x=1490, 2340 y 3930, todos con su cara
 superior en y=488. Los de x=1490 y x=3930 entregan una moneda; el de x=2340
 sigue vacío. Se animan una sola vez y quedan usados.

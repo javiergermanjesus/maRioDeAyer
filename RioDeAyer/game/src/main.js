@@ -13,6 +13,16 @@ const ORIGINAL_WORLD_WIDTH = WIDTH * 3.5;
 const WORLD_WIDTH = ORIGINAL_WORLD_WIDTH * 1.5;
 const GROUND_Y = 640;
 const VIEW_ZOOM = 1.6;
+// Keep the existing artwork scale and baseline. Idle/walk/jump heads start at
+// source row 45; the unused canvas above them must not collide with ceilings.
+const PLAYER_VISUAL_SCALE = 0.2 * 278 / 262;
+const PLAYER_FEET_BASELINE = 299;
+const PLAYER_FRAME_HEIGHT = 64;
+// The idle silhouette is ~30 px wide inside the 36 px canvas.
+const PLAYER_BODY_WIDTH = 30;
+const PLAYER_BODY_OFFSET_X = 3;
+const PLAYER_STANDING_HEIGHT = (PLAYER_FEET_BASELINE - 45) * PLAYER_VISUAL_SCALE;
+const PLAYER_CROUCH_HEIGHT = 32; // One block (33 × 32), versus ~54 when standing.
 // The first bank contains the first patrol, keeping the opening peaceful even
 // when the player waits. Introduce single mushrooms before pairs and turtles.
 const ENEMY_SPAWNS = [1140, 1490, 1560, 2650, 2940, 3010];
@@ -127,19 +137,11 @@ class Playground extends Phaser.Scene {
     this.physics.world.setBounds(0, 0, WORLD_WIDTH, HEIGHT);
 
     this.player = this.physics.add.sprite(378, GROUND_Y - 32, 'player');
-    // All visual frames retain the original 36 × 64 canvas and body geometry.
-    this.player.body.setSize(32, 64).setOffset(2, 0);
+    // The 36 × 64 visual canvas stays intact; only opaque headroom is solid.
+    this.player.body.setSize(PLAYER_BODY_WIDTH, PLAYER_STANDING_HEIGHT, false)
+      .setOffset(PLAYER_BODY_OFFSET_X, PLAYER_FRAME_HEIGHT - PLAYER_STANDING_HEIGHT);
     this.player.setCollideWorldBounds(true).setBounce(0);
     this.playerTerrainCollider = this.physics.add.collider(this.player, this.surfaces);
-    this.enemies = new EnemySystem(this, this.player, this.surfaces);
-    for (const x of ENEMY_SPAWNS) this.enemies.spawnHongo(x, GROUND_Y);
-    for (const { x, groundY, direction } of TURTLE_SPAWNS) {
-      this.enemies.spawnTortuga(x, groundY, direction);
-    }
-    for (const x of EXTENSION_HONGO_SPAWNS) this.enemies.spawnHongo(x, GROUND_Y);
-    for (const { x, groundY, direction } of EXTENSION_TURTLE_SPAWNS) {
-      this.enemies.spawnTortuga(x, groundY, direction);
-    }
     this.events.on('enemy-impact', this.die, this);
     this.events.on('powerup-collected', this.collectPowerUp, this);
     this.coinSystem = new CoinSystem(this, this.player);
@@ -154,6 +156,18 @@ class Playground extends Phaser.Scene {
         if (other !== powerUp) powerUp.colliders.push(
           this.physics.add.collider(powerUp.mushroom, other.solid));
       }
+    }
+
+    // Resolve every player/solid collision before checking enemy contact.
+    // Otherwise an enemy behind a block can hit a position Arcade will undo.
+    this.enemies = new EnemySystem(this, this.player, this.surfaces);
+    for (const x of ENEMY_SPAWNS) this.enemies.spawnHongo(x, GROUND_Y);
+    for (const { x, groundY, direction } of TURTLE_SPAWNS) {
+      this.enemies.spawnTortuga(x, groundY, direction);
+    }
+    for (const x of EXTENSION_HONGO_SPAWNS) this.enemies.spawnHongo(x, GROUND_Y);
+    for (const { x, groundY, direction } of EXTENSION_TURTLE_SPAWNS) {
+      this.enemies.spawnTortuga(x, groundY, direction);
     }
 
     const camera = this.cameras.main;
@@ -189,18 +203,40 @@ class Playground extends Phaser.Scene {
     const hudObjects = this.children.list.slice(hudStart);
     // Separate display cameras keep scenery and HUD independent of world zoom.
     this.landscapeCamera = this.cameras.add(0, 0, WIDTH, HEIGHT, false, 'landscape');
-    const hudCamera = this.cameras.add(0, 0, WIDTH, HEIGHT, false, 'hud');
+    const hudCamera = this.hudCamera = this.cameras.add(0, 0, WIDTH, HEIGHT, false, 'hud');
     camera.ignore([...this.backgrounds, ...hudObjects]);
     this.landscapeCamera.ignore([...worldObjects, ...hudObjects]);
     hudCamera.ignore([...worldObjects, ...this.backgrounds]);
     this.cameras.cameras.splice(0, 3, this.landscapeCamera, camera, hudCamera);
+    this.setPhysicsDebug(typeof window !== 'undefined'
+      && new URLSearchParams(window.location.search).get('debugPhysics') === '1');
+    this.input.keyboard.on('keydown-F2', this.togglePhysicsDebug, this);
     const syncLandscape = () => {
       this.landscapeCamera.setScroll(camera.worldView.x, 0);
     };
     this.events.on(Phaser.Scenes.Events.PRE_RENDER, syncLandscape);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.events.off(Phaser.Scenes.Events.PRE_RENDER, syncLandscape);
+      this.input.keyboard.off('keydown-F2', this.togglePhysicsDebug, this);
     });
+  }
+
+  setPhysicsDebug(enabled) {
+    const world = this.physics.world;
+    if (enabled && !world.debugGraphic) world.createDebugGraphic();
+    world.drawDebug = enabled;
+    if (world.debugGraphic) {
+      // Arcade draws in world coordinates. Scenery and HUD cameras must not
+      // draw a second copy at a different scale or scroll position.
+      this.landscapeCamera.ignore(world.debugGraphic);
+      this.hudCamera.ignore(world.debugGraphic);
+      world.debugGraphic.setVisible(enabled);
+    }
+  }
+
+  togglePhysicsDebug(event) {
+    if (event?.repeat) return;
+    this.setPhysicsDebug(!this.physics.world.drawDebug);
   }
 
   collectPowerUp({ type }) {
@@ -297,8 +333,8 @@ class Playground extends Phaser.Scene {
     const source = sheet.getSourceImage();
     // The grid's idle artwork is 262 px tall instead of 278 px in the old atlas.
     // Preserve its visible height and feet baseline inside the same 36 × 64 frame.
-    const visualScale = 0.2 * 278 / 262;
-    const feetBaseline = 299;
+    const visualScale = PLAYER_VISUAL_SCALE;
+    const feetBaseline = PLAYER_FEET_BASELINE;
     const texture = this.textures.createCanvas('player', 36 * poses.length, 64);
     const ctx = texture.context;
     ctx.imageSmoothingEnabled = false;
@@ -386,6 +422,7 @@ class Playground extends Phaser.Scene {
   updateMovement(input, dt) {
     const body = this.player.body;
     const grounded = body.blocked.down && body.velocity.y >= 0;
+    const standBlocked = body.height < PLAYER_STANDING_HEIGHT && !this.canPlayerStand();
     let speed = body.velocity.x;
 
     // A slide owns horizontal motion until friction stops it or support is lost.
@@ -394,10 +431,10 @@ class Playground extends Phaser.Scene {
     if (sliding) {
       speed = approach(speed, 0, MOVEMENT.slideFriction * dt);
       this.player.setVelocityX(speed);
-      this.movementState = speed !== 0 ? 'slide' : input.crouch ? 'crouch' : 'idle';
+      this.movementState = speed !== 0 ? 'slide' : input.crouch || standBlocked ? 'crouch' : 'idle';
       return;
     }
-    if (grounded && input.crouch) {
+    if (grounded && (input.crouch || standBlocked)) {
       this.player.setVelocityX(0);
       this.movementState = 'crouch';
       return;
@@ -426,6 +463,41 @@ class Playground extends Phaser.Scene {
     else if (speed === 0) this.movementState = 'idle';
     else if ((input.run && input.direction) || Math.abs(speed) > MOVEMENT.walkSpeed) this.movementState = 'run';
     else this.movementState = 'walk';
+  }
+
+  canPlayerStand() {
+    const body = this.player.body;
+    const top = body.bottom - PLAYER_STANDING_HEIGHT;
+    const solids = [
+      ...(this.surfaces?.getChildren() ?? []),
+      ...(this.bricks?.group.getChildren() ?? []),
+      ...(this.powerUps?.map(powerUp => powerUp.solid) ?? []),
+    ];
+    // Edge contact is allowed: an adjacent wall or the supporting floor should
+    // not prevent standing. Disabled/broken blocks no longer form a ceiling.
+    return !solids.some(({ body: solid }) => solid?.enable
+      && body.x < solid.right && body.right > solid.x
+      && top < solid.bottom && body.bottom > solid.y);
+  }
+
+  updatePlayerBody() {
+    const body = this.player.body;
+    const crouched = this.movementState === 'crouch' || this.movementState === 'slide';
+    const height = crouched ? PLAYER_CROUCH_HEIGHT : PLAYER_STANDING_HEIGHT;
+    if (body.height === height) return;
+    if (!crouched && !this.canPlayerStand()) {
+      this.movementState = 'crouch';
+      return;
+    }
+    const shift = body.height - height;
+    body.setSize(PLAYER_BODY_WIDTH, height, false)
+      .setOffset(PLAYER_BODY_OFFSET_X, PLAYER_FRAME_HEIGHT - height);
+    // Scene.update runs between Arcade's step and postUpdate. Move its history
+    // with the top edge so a resize is not applied to the sprite as Y motion.
+    body.y += shift;
+    body.prev.y += shift;
+    body.prevFrame.y += shift;
+    body.updateCenter();
   }
 
   updatePlayerAnimation() {
@@ -463,6 +535,7 @@ class Playground extends Phaser.Scene {
       return;
     }
     this.updateMovement(this.readMovementInput(), Math.min(delta, 50) / 1000);
+    this.updatePlayerBody();
     this.updatePlayerAnimation();
     this.enemies?.update();
   }
@@ -478,7 +551,7 @@ new Phaser.Game({
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
   physics: {
     default: 'arcade',
-    arcade: { gravity: { y: 1600 }, debug: false },
+    arcade: { gravity: { y: 1600 }, debug: false, debugShowVelocity: false },
   },
   scene: Playground,
 });

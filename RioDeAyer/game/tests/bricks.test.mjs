@@ -16,11 +16,11 @@ const context = vm.createContext({ Phaser: { Scene: class {} } });
 const load = name => readFileSync(new URL(`../src/${name}.js`, import.meta.url), 'utf8')
   .replace(/^import .*;\r?\n/gm, '').replace(/export /g, '');
 vm.runInContext(load('powerups') + load('bricks') + `
-  globalThis.api = { BrickSystem, makeBrickTextures, BRICK_LAYOUT, USED_BLOCK_LAYOUT, BRICK_WIDTH, BRICK_HEIGHT };`, context);
+  globalThis.api = { BrickSystem, PowerUpSystem, makeBrickTextures, BRICK_LAYOUT, USED_BLOCK_LAYOUT, BRICK_WIDTH, BRICK_HEIGHT };`, context);
 vm.runInContext(load('main').split('new Phaser.Game(')[0] + `
   globalThis.Playground = Playground;
   globalThis.layout = { QUESTION_BLOCKS, LEVEL_SURFACES, RIVER_GAPS, WORLD_WIDTH };`, context);
-const { BrickSystem, makeBrickTextures, BRICK_LAYOUT, USED_BLOCK_LAYOUT, BRICK_WIDTH, BRICK_HEIGHT } = context.api;
+const { BrickSystem, PowerUpSystem, makeBrickTextures, BRICK_LAYOUT, USED_BLOCK_LAYOUT, BRICK_WIDTH, BRICK_HEIGHT } = context.api;
 const layout = JSON.parse(JSON.stringify(context.layout));
 
 function contact(powered = true, material = 'clay') {
@@ -113,6 +113,137 @@ test('normal players, used-metal blocks, side contacts and descending landings n
   assert.equal(brick.body.enable, true);
 });
 
+test('powered center and near-edge hits break clay at both jump impulses and three frame rates', () => {
+  for (const fps of [30, 60, 120]) {
+    for (const impulse of [-650, -760]) {
+      for (const point of ['center-left', 'center-right', 'left-edge', 'right-edge']) {
+        const { system, player, brick, particles, world } = contact();
+        const body = player.body;
+        body.setSize(30, 53.9, false);
+        const vx = point.endsWith('right') || point === 'right-edge' ? -400 : 400;
+        const travel = -(impulse + 1600 / fps) / fps;
+        const crossX = point === 'left-edge' ? brick.body.x - body.width + 0.1
+          : point === 'right-edge' ? brick.body.right - 0.1
+            : brick.body.x + brick.body.width / 2 - body.width / 2;
+        body.x = crossX - vx / fps * (2 / travel);
+        body.y = brick.body.bottom + 2;
+        body.velocity.set(vx, impulse);
+        body.update(1 / fps);
+        world.collideSpriteVsSprite(player, brick,
+          (p, b) => system.finishContact(p, b), (p, b) => system.processContact(p, b), undefined, false);
+        assert.equal(brick.body.enable, false, `${point}, ${fps} fps, impulse ${impulse}`);
+        assert.equal(body.y, brick.body.bottom);
+        assert.equal(body.velocity.y, 0);
+        assert.equal(particles.length, 4);
+      }
+    }
+  }
+});
+
+test('a shared underside breaks the reached clay regardless of adjacent-solid collision order', () => {
+  for (const side of [-1, 1]) {
+    for (const neighborKind of ['question', 'used-metal', 'clay']) {
+      for (const first of ['neighbor', 'brick']) {
+        const { system, player, brick, particles, world } = contact();
+        const neighborBody = new StaticBody(world);
+        neighborBody.setSize(33, 32, false);
+        neighborBody.x = brick.body.x + side * 33;
+        neighborBody.y = brick.body.y;
+        const neighbor = { body: neighborBody, material: neighborKind,
+          x: neighborBody.x + 16.5, y: neighborBody.y, cameraFilter: 5,
+          setVisible(v) { this.visible = v; }, destroy() {} };
+        neighborBody.gameObject = neighbor;
+        system.group = { getChildren: () => neighborKind === 'clay' ? [brick, neighbor] : [brick] };
+        player.body.setSize(30, 53.9, false);
+        player.body.x = (side < 0 ? brick.body.x : brick.body.right) - 15;
+        player.body.prev.x = player.body.x;
+        const collide = block => world.collideSpriteVsSprite(player, block,
+          (p, b) => system.finishContact(p, b), (p, b) => system.processContact(p, b), undefined, false);
+        if (first === 'neighbor') { collide(neighbor); collide(brick); }
+        else { collide(brick); collide(neighbor); }
+        assert.equal(brick.body.enable, false, `${neighborKind} on ${side}, ${first} first`);
+        assert.equal(neighbor.body.enable, neighborKind !== 'clay');
+        assert.equal(player.body.y, brick.body.bottom);
+        assert.equal(player.body.velocity.y, 0);
+        assert.equal(particles.length, neighborKind === 'clay' ? 8 : 4);
+        system.finishContact(player, brick);
+        system.finishContact(player, neighbor);
+        assert.equal(particles.length, neighborKind === 'clay' ? 8 : 4, 'one burst per brick');
+      }
+    }
+  }
+});
+
+test('the actual question-block callbacks preserve an adjacent brick hit before their separation', () => {
+  for (const powered of [false, true]) {
+    const { system, scene, player, brick, particles, world } = contact(powered);
+    system.group = { getChildren: () => [brick] };
+    scene.bricks = system;
+    scene.textures = { exists: () => true };
+    scene.anims = { exists: () => true };
+    scene.events = { once() {} };
+    const object = (x, y, width, height) => ({ x, y, width, height,
+      setOrigin() { return this; }, setDepth() { return this; }, setVisible() { return this; },
+      setBounce() { return this; }, on() {}, destroy() {} });
+    scene.add = { sprite: (x, y) => object(x, y, 33, 32), rectangle: object };
+    scene.physics.add.sprite = (x, y) => {
+      const mushroom = object(x, y, 26, 25);
+      mushroom.body = new Body(world);
+      return mushroom;
+    };
+    scene.physics.add.existing = solid => {
+      const body = solid.body = new StaticBody(world);
+      body.setSize(solid.width, solid.height, false);
+      body.x = solid.x - solid.width / 2;
+      body.y = solid.y - solid.height / 2;
+      body.gameObject = solid;
+    };
+    scene.physics.add.collider = (p, solid, onCollide, onProcess) => ({
+      run() { world.collide(p, solid, onCollide, onProcess); },
+    });
+    const question = new PowerUpSystem(scene, player, {}, brick.x + 33, brick.y, false);
+    player.body.x = player.body.prev.x = brick.body.right - 15;
+    question.colliders[0].run();
+    assert.equal(question.state, 'bumping');
+    assert.equal(question.solid.body.enable, true);
+    assert.equal(brick.body.enable, !powered);
+    assert.equal(particles.length, powered ? 4 : 0);
+    assert.equal(player.body.y, question.solid.body.bottom);
+    assert.equal(player.body.velocity.y, 0);
+  }
+});
+
+test('entering a side after crossing the underside does not break; a higher row stays solid', () => {
+  const side = contact();
+  const body = side.player.body;
+  body.setSize(30, 53.9, false);
+  body.y = side.brick.body.bottom + 2;
+  const travel = (650 - 1600 / 30) / 30;
+  body.x = side.brick.body.x - body.width - 0.5 - 400 / 30 * (2 / travel);
+  body.velocity.set(400, -650);
+  body.update(1 / 30);
+  side.world.collideSpriteVsSprite(side.player, side.brick,
+    (p, b) => side.system.finishContact(p, b), (p, b) => side.system.processContact(p, b), undefined, false);
+  assert.equal(side.brick.body.enable, true);
+  assert.equal(side.particles.length, 0);
+
+  const { system, player, brick, particles, world } = contact();
+  const upperBody = new StaticBody(world);
+  upperBody.setSize(33, 32, false);
+  upperBody.x = brick.body.x;
+  upperBody.y = brick.body.y - 32;
+  const upper = { body: upperBody, material: 'clay' };
+  system.group = { getChildren: () => [brick, upper] };
+  player.body.prev.y = 540;
+  player.body.y = 494;
+  player.body._dy = -46;
+  world.collideSpriteVsSprite(player, brick,
+    (p, b) => system.finishContact(p, b), (p, b) => system.processContact(p, b), undefined, false);
+  assert.equal(brick.body.enable, false);
+  assert.equal(upper.body.enable, true);
+  assert.equal(particles.length, 4);
+});
+
 test('mushroom event grants the brick ability only, ignoring unrelated and dead-player pickups', () => {
   const scene = new context.Playground();
   scene.powered = false;
@@ -172,9 +303,8 @@ test('brick structures do not overlap question blocks or rivers and leave a pass
     const ground=layout.LEVEL_SURFACES.filter(s=>rect.left<s.x+s.width&&rect.right>s.x).sort((a,b)=>a.y-b.y)[0];
     assert.ok(ground);
     const headroom=ground.y-rect.bottom;
-    // Overhead rows have >=64 px clearance. The only low structure is the
-    // optional stair, whose steps rise less than the normal jump height.
-    assert.ok(headroom>=64 || (rect.left>=4240.5&&rect.right<=4339.5));
+    // The low stair entrance is one full block; all other passages have >=64 px.
+    assert.ok(headroom>=64 || (rect.left===4240.5 && headroom===32));
   }
   assert.ok(640-552 < 650**2/(2*1600));
   assert.ok(552-488 < 650**2/(2*1600));
@@ -221,7 +351,7 @@ test('used blocks spawn with the exact exhausted question frame, stay solid and 
   for(const metal of metals) {
     assert.equal(metal.key,'question-block');
     assert.equal(metal.frame,4);
-    const player={body:{blocked:{up:true},y:520}};
+    const player={body:{blocked:{up:true},y:520, prev:{x:0,y:521},velocity:{y:0}}};
     assert.equal(process(player,metal),true);
     collide(player,metal);
     assert.equal(metal.body.enable,true);

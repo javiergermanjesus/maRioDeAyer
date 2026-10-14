@@ -14,6 +14,9 @@ const TURTLE_SPEED = 48;
 const SHELL_SPEED = 330;
 const SHELL_WAIT = 5000;
 const TURTLE_SCALE = 0.32;
+// Opaque walking silhouettes begin at x≈5.6/y≈4.9 in the 44 × 40
+// rendered frame. Exclude the PNG's faint margins, keeping the foot baseline.
+export const HONGO_BODY = { width: 33, height: 35, x: 5.5, y: 5 };
 // Source-pixel body bounds exclude transparent margins; both share a foot baseline.
 export const TURTLE_BODIES = {
   walking: { width: 148, height: 96, x: 22, y: 40 },
@@ -110,7 +113,8 @@ export class EnemySystem {
 
   spawnHongo(x, groundY) {
     const enemy = this.group.create(x, groundY - 20, 'hongo', 'walk-1');
-    enemy.body.setSize(36, 38).setOffset(4, 2);
+    enemy.body.setSize(HONGO_BODY.width, HONGO_BODY.height, false)
+      .setOffset(HONGO_BODY.x, HONGO_BODY.y);
     enemy.setCollideWorldBounds(true).setBounce(0);
     enemy.direction = -1;
     enemy.enemyState = 'walking';
@@ -132,10 +136,21 @@ export class EnemySystem {
   setTurtleState(enemy, state) {
     enemy.stateTimer?.remove(false);
     enemy.stateTimer = null;
+    const initialized = enemy.enemyState !== undefined;
+    const oldHeight = enemy.body.height;
     enemy.enemyState = state;
     const shape = TURTLE_BODIES[state === 'walking' ? 'walking' : 'shell'];
     enemy.body.setSize(shape.width, shape.height, false).setOffset(shape.x, shape.y);
-    enemy.body.updateFromGameObject();
+    if (initialized) {
+      // A contact callback runs before postUpdate has moved the sprite.
+      // Resize the current simulation pose and history instead of rewinding it
+      // to that old sprite position or counting the new offset as foot motion.
+      const shift = oldHeight - enemy.body.height;
+      enemy.body.y += shift;
+      enemy.body.prev.y += shift;
+      enemy.body.prevFrame.y += shift;
+      enemy.body.updateCenter();
+    } else enemy.body.updateFromGameObject();
     enemy.setVelocityX(state === 'walking' ? enemy.direction * TURTLE_SPEED
       : state === 'sliding' ? enemy.direction * SHELL_SPEED : 0);
     const direction = enemy.direction > 0 ? 'right' : 'left';
@@ -153,13 +168,16 @@ export class EnemySystem {
   touchTurtle(enemy) {
     // Ignore the kicker until their hitboxes separate, including a stop/re-kick cycle.
     if (enemy.kickContact) return;
-    if (isStomp(this.player.body, enemy.body)) {
+    if (['walking', 'sliding'].includes(enemy.enemyState)
+      && isStomp(this.player.body, enemy.body)) {
       this.setTurtleState(enemy, enemy.enemyState === 'walking' ? 'hiding' : 'shell');
       enemy.kickContact = true;
       this.player.setVelocityY(BOUNCE);
       return;
     }
     if (['hiding', 'shell', 'emerging'].includes(enemy.enemyState)) {
+      // A fresh landing on a stationary shell kicks it too; only walking
+      // turtles and moving shells rebound the player on a valid stomp.
       // A contact from below does not count as a lateral kick.
       const body = this.player.body;
       if (body.bottom <= enemy.body.y || body.y >= enemy.body.bottom) return;

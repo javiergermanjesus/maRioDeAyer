@@ -93,11 +93,14 @@ export class PowerUpSystem {
       this.block.width, this.block.height).setVisible(false);
     scene.physics.add.existing(this.solid, true);
     this.colliders = [
-      scene.physics.add.collider(player, this.solid, undefined, () => {
-        if (scene.dead) return false;
-        if (isHitFromBelow(player.body, this.solid.body)) this.activate();
-        return true;
-      }),
+      scene.physics.add.collider(player, this.solid,
+        () => scene.bricks?.finishContact(player, this.solid), () => {
+          if (scene.dead) return false;
+          // Record neighboring clay hits before this solid resolves a shared edge.
+          scene.bricks?.processContact(player, this.solid);
+          if (isHitFromBelow(player.body, this.solid.body)) this.activate();
+          return true;
+        }),
     ];
     if (this.mushroom) this.colliders.push(
       scene.physics.add.collider(this.mushroom, surfaces),

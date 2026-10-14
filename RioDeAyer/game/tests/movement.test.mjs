@@ -2,6 +2,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import vm from 'node:vm';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const Body = require('../../node_modules/phaser/src/physics/arcade/Body.js');
+const StaticBody = require('../../node_modules/phaser/src/physics/arcade/StaticBody.js');
+const World = require('../../node_modules/phaser/src/physics/arcade/World.js');
 
 // Exercise the scene's actual input/state logic without needing a browser renderer.
 const source = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
@@ -14,15 +20,23 @@ const context = vm.createContext({ Phaser: {
   } } },
 } });
 vm.runInContext(source.replace(/^import .*;\r?\n/gm, '').split('new Phaser.Game(')[0]
-  + '\nglobalThis.Playground = Playground;', context);
+  + '\nglobalThis.Playground = Playground; globalThis.standingHeight = PLAYER_STANDING_HEIGHT;', context);
+vm.runInContext(readFileSync(new URL('../src/bricks.js', import.meta.url), 'utf8')
+  .replace(/^import .*;\r?\n/gm, '').replace(/export /g, '')
+  + '\nglobalThis.stair = [...BRICK_LAYOUT, ...USED_BLOCK_LAYOUT].filter(b => b.x >= 4257 && b.x <= 4323);', context);
 
 function setup() {
   const scene = new context.Playground();
   const key = () => ({ isDown: false, edge: false });
   scene.cursors = { left: key(), right: key(), up: key(), down: key() };
   scene.keys = { A: key(), D: key(), W: key(), S: key(), SPACE: key() };
+  const world = scene.physics = { world: Object.assign(Object.create(World.prototype), {
+    defaults: {}, bounds: {}, gravity: { x: 0, y: 1600 }, OVERLAP_BIAS: 4, _total: 0,
+    staticTree: { insert() {}, remove() {} },
+  }) };
   const player = scene.player = {
-    body: { velocity: { x: 0, y: 0 }, blocked: { down: true } },
+    x: 378, y: 608, angle: 0, rotation: 0, scaleX: 1, scaleY: 1,
+    displayOriginX: 18, displayOriginY: 32, displayWidth: 36, displayHeight: 64,
     setVelocityX(x) { this.body.velocity.x = x; },
     setVelocityY(y) { this.body.velocity.y = y; },
     setFlipX(flip) { this.flipX = flip; },
@@ -30,6 +44,12 @@ function setup() {
     play(animation) { this.animation = animation; },
     anims: { stop() { player.animation = null; } },
   };
+  player.body = new Body(world.world, player);
+  player.body.setSize(30, context.standingHeight, false).setOffset(3, 64 - context.standingHeight);
+  player.body.updateFromGameObject();
+  player.body.prev.copy(player.body.position);
+  player.body.prevFrame.copy(player.body.position);
+  player.body.blocked.down = true;
   scene.input = { keyboard: { resetKeys() {
     for (const k of [...Object.values(scene.keys), ...Object.values(scene.cursors)]) {
       k.isDown = false;
@@ -41,6 +61,192 @@ function setup() {
   };
   return scene;
 }
+
+function solid(scene, x, y, width, height) {
+  const body = new StaticBody(scene.physics.world);
+  body.setSize(width, height, false);
+  body.x = x;
+  body.y = y;
+  const object = { body };
+  body.gameObject = object;
+  return object;
+}
+
+test('crouch and stand preserve the feet, sprite and Arcade postUpdate displacement', () => {
+  const s = setup();
+  const body = s.player.body;
+  const feet = body.bottom;
+  const spriteY = s.player.y;
+  assert.ok(body.height > 1.5 * 32 && body.height < 2 * 32);
+  for (let i = 0; i < 10; i++) {
+    // Include a real downward displacement before the resize. It must reach
+    // the sprite once, without the change of body height being added to it.
+    body.preUpdate(false, 0);
+    body.y += 2;
+    s.keys.S.isDown = true;
+    s.tick();
+    assert.equal(body.height, 32);
+    assert.equal(body.bottom, feet + 2 * (i + 1));
+    body.postUpdate();
+    assert.equal(s.player.y, spriteY + 2 * (i + 1));
+    body.preUpdate(false, 0);
+    s.keys.S.isDown = false;
+    s.tick();
+    assert.equal(body.height, context.standingHeight);
+    assert.equal(body.bottom, feet + 2 * (i + 1));
+    body.postUpdate();
+    assert.equal(s.player.y, spriteY + 2 * (i + 1));
+  }
+});
+
+test('releasing crouch under terrain, bricks or question blocks waits for headroom', () => {
+  for (const kind of ['terrain', 'brick', 'question']) {
+    const s = setup();
+    s.keys.S.isDown = true;
+    s.tick();
+    const ceiling = solid(s, s.player.body.x, 576, 33, 32);
+    if (kind === 'terrain') s.surfaces = { getChildren: () => [ceiling] };
+    if (kind === 'brick') s.bricks = { group: { getChildren: () => [ceiling] } };
+    if (kind === 'question') s.powerUps = [{ solid: ceiling, update() {} }];
+    s.keys.S.isDown = false;
+    s.keys.SPACE.edge = true;
+    s.tick(30);
+    assert.equal(s.movementState, 'crouch');
+    assert.equal(s.player.body.height, 32);
+    assert.equal(s.player.body.bottom, 640);
+    assert.equal(s.player.body.velocity.y, 0);
+    ceiling.body.x = s.player.body.right; // Just touching the wall allows standing.
+    s.tick();
+    assert.equal(s.movementState, 'idle');
+    assert.equal(s.player.body.height, context.standingHeight);
+    assert.equal(s.player.body.velocity.y, 0, 'blocked jump was not queued');
+    s.keys.S.isDown = true;
+    s.tick();
+    ceiling.body.x = s.player.body.x;
+    ceiling.body.enable = false;
+    s.keys.S.isDown = false;
+    s.tick();
+    assert.equal(s.movementState, 'idle', 'broken blocks no longer prevent standing');
+  }
+});
+
+test('a real Arcade slide crosses a one-block-high tunnel without ceiling or side collisions', () => {
+  for (const fps of [30, 60, 120]) {
+    const s = setup();
+    const body = s.player.body;
+    const floor = solid(s, 300, 640, 600, 80);
+    const ceiling = solid(s, 430, 576, 99, 32);
+    s.surfaces = { getChildren: () => [floor, ceiling] };
+    body.velocity.x = 400;
+    s.keys.S.isDown = s.keys.S.edge = true;
+    s.tick();
+    s.keys.S.isDown = false;
+    for (let frame = 0; frame < fps; frame++) {
+      body.preUpdate(true, 1 / fps);
+      s.physics.world.collideSpriteVsSprite(s.player, floor, undefined, undefined, undefined, false);
+      let ceilingCollision = false;
+      s.physics.world.collideSpriteVsSprite(
+        s.player, ceiling, () => { ceilingCollision = true; }, undefined, undefined, false);
+      assert.equal(ceilingCollision, false,
+        JSON.stringify({ fps, frame, x: body.x, y: body.y, height: body.height,
+          blocked: body.blocked, velocity: body.velocity, spriteY: s.player.y }));
+      s.tick(1, 1000 / fps);
+      if (body.x < ceiling.body.right && body.right > ceiling.body.x) {
+        assert.equal(body.height, 32);
+      }
+      assert.ok(Math.abs(body.bottom - 640) < 1e-9);
+      body.postUpdate();
+    }
+    assert.ok(body.x > ceiling.body.right, `tunnel exit reached at ${fps} fps`);
+    assert.equal(body.height, context.standingHeight);
+  }
+});
+
+test('a slide that stops inside a tunnel stays crouched after Down is released', () => {
+  const s = setup();
+  const ceiling = solid(s, s.player.body.x - 1, 576, 100, 32);
+  s.player.body.velocity.x = 400;
+  s.keys.S.isDown = s.keys.S.edge = true;
+  s.tick();
+  s.surfaces = { getChildren: () => [ceiling] };
+  s.keys.S.isDown = false;
+  s.tick(120);
+  assert.equal(s.movementState, 'crouch');
+  assert.equal(s.player.body.height, 32);
+  assert.equal(s.player.body.velocity.x, 0);
+  assert.equal(s.player.frame, 'crouch');
+});
+
+test('the actual level stair permits a slide through its one-block entrance and then standing', () => {
+  for (const fps of [30, 60, 120]) {
+    const s = setup();
+    s.player.x = 4210;
+    const floor = solid(s, 4160, 640, 400, 80);
+    const steps = Array.from(context.stair, b => solid(s, b.x - 16.5, b.topY, 33, 32));
+    s.surfaces = { getChildren: () => [floor] };
+    s.bricks = { group: { getChildren: () => steps } };
+    s.player.body.velocity.x = 400;
+    s.keys.S.isDown = s.keys.S.edge = true;
+    s.tick();
+    s.keys.S.isDown = false;
+    let entered = false;
+    for (let frame = 0; frame < fps; frame++) {
+      const body = s.player.body;
+      body.preUpdate(true, 1 / fps);
+      s.physics.world.collide(s.player, floor);
+      for (const step of steps) {
+        s.physics.world.collide(s.player, step, () => assert.fail('unexpected stair collision'));
+      }
+      s.tick(1, 1000 / fps);
+      if (body.x < 4273.5 && body.right > 4240.5) {
+        entered = true;
+        assert.equal(body.height, 32);
+      }
+      assert.ok(Math.abs(body.bottom - 640) < 1e-9);
+      body.postUpdate();
+    }
+    assert.equal(entered, true);
+    assert.ok(s.player.body.x > 4339.5);
+    assert.equal(s.player.body.height, context.standingHeight);
+  }
+});
+
+test('standing still collides with a one-block tunnel; crouching cannot cross a 24-pixel opening', () => {
+  for (const [crouched, gap] of [[false, 32], [true, 24]]) {
+    const s = setup();
+    s.keys.S.isDown = crouched;
+    s.tick();
+    s.player.x = 411;
+    const body = s.player.body;
+    const floor = solid(s, 300, 640, 600, 80);
+    const ceiling = solid(s, 430, 640 - gap - 32, 99, 32);
+    body.velocity.x = 400;
+    body.preUpdate(true, 1 / 60);
+    s.physics.world.collideSpriteVsSprite(s.player, floor, undefined, undefined, undefined, false);
+    s.physics.world.collideSpriteVsSprite(s.player, ceiling, undefined, undefined, undefined, false);
+    assert.equal(body.blocked.right, true);
+    assert.equal(body.velocity.x, 0);
+    assert.equal(body.right, ceiling.body.x);
+  }
+});
+
+test('leaving support below a ceiling retains the short pose until space opens', () => {
+  const s = setup();
+  s.player.body.velocity.x = 400;
+  s.keys.S.isDown = s.keys.S.edge = true;
+  s.tick();
+  const ceiling = solid(s, s.player.body.x - 1, 576, 100, 32);
+  s.surfaces = { getChildren: () => [ceiling] };
+  s.keys.S.isDown = false;
+  s.player.body.blocked.down = false;
+  s.tick();
+  assert.equal(s.player.body.height, 32);
+  assert.equal(s.player.frame, 'crouch');
+  ceiling.body.enable = false;
+  s.tick();
+  assert.equal(s.player.body.height, context.standingHeight);
+  assert.equal(s.player.frame, 'jump');
+});
 
 test('walk, gradual run, max speed, braking and both physical Shift keys', () => {
   for (const code of ['ShiftLeft', 'ShiftRight']) {

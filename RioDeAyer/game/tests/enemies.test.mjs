@@ -18,11 +18,17 @@ function turtleSetup(state = 'walking') {
   enemy.body.y = 602;
   enemy.body.right = 136;
   enemy.body.center = { x: 118 };
-  enemy.body.setSize = function(w, h) { enemy.hitbox = { w, h }; return this; };
+  enemy.body.height = (state === 'walking' ? 96 : 84) * 0.32;
+  enemy.body.prevFrame = { x: 100, y: 602 };
+  enemy.body.updateCenter = () => {};
+  enemy.body.setSize = function(w, h) {
+    enemy.hitbox = { w, h }; this.height = h * 0.32; return this;
+  };
   enemy.body.setOffset = function(x, y) { enemy.offset = { x, y }; return this; };
   enemy.body.updateFromGameObject = () => {};
   enemy.play = key => { enemy.animation = key; };
-  player.body.y = 541;
+  player.body.y = 546;
+  player.body.bottom = 610;
   player.body.right = 132;
   player.body.center = { x: 116 };
   return result;
@@ -82,6 +88,57 @@ test('stomping a sliding shell stops it; walking and sliding side contacts damag
     result.player.body.prev.y = 580;
     result.system.touchPlayer(result.enemy);
     assert.equal(result.impacts.length, 1);
+  }
+});
+
+test('one walking stomp rebounds once; a separated landing kicks the shell without another bounce', () => {
+  const { system, enemy, player, timers, impacts } = turtleSetup();
+  system.touchPlayer(enemy);
+  assert.equal(enemy.enemyState, 'hiding');
+  assert.equal(player.body.velocity.y, -360);
+  const hideTimer = timers[0];
+  // Even if gravity is descending again, an uninterrupted overlap must not
+  // restart the state timer, rebound, or kick on every physics frame.
+  player.body.velocity.y = 25;
+  for (let frame = 0; frame < 60; frame++) {
+    system.update();
+    system.touchPlayer(enemy);
+    assert.equal(enemy.enemyState, 'hiding');
+    assert.equal(player.body.velocity.y, 25);
+    assert.equal(timers.length, 1);
+  }
+  player.body.bottom = enemy.body.y - 1;
+  system.update();
+  assert.equal(enemy.kickContact, false);
+  hideTimer.callback();
+  player.body.bottom = enemy.body.y + 3;
+  player.body.velocity.y = 400;
+  system.touchPlayer(enemy);
+  assert.equal(enemy.enemyState, 'sliding');
+  assert.equal(enemy.speed, 330);
+  assert.equal(player.body.velocity.y, 400, 'stationary shells do not apply rebound');
+  const timerCount = timers.length;
+  for (let frame = 0; frame < 30; frame++) {
+    system.update();
+    system.touchPlayer(enemy);
+    assert.equal(enemy.enemyState, 'sliding');
+    assert.equal(timers.length, timerCount);
+    assert.equal(player.body.velocity.y, 400);
+  }
+  assert.equal(impacts.length, 0);
+});
+
+test('a new top contact kicks hiding, stationary and emerging shells in either direction', () => {
+  for (const state of ['hiding', 'shell', 'emerging']) {
+    for (const [x, direction] of [[90, 1], [140, -1]]) {
+      const { system, enemy, player, timers } = turtleSetup(state);
+      player.body.center.x = x;
+      system.touchPlayer(enemy);
+      assert.equal(enemy.enemyState, 'sliding');
+      assert.equal(enemy.speed, direction * 330);
+      assert.equal(player.body.velocity.y, 400);
+      assert.equal(timers.length, 0, 'kick does not start another emergence timer');
+    }
   }
 });
 

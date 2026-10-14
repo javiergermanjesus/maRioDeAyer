@@ -17,10 +17,11 @@ export const BRICK_LAYOUT = [
   { x: 3897, topY: 488, vines: true },
   { x: 3963, topY: 488, vines: false },
   // A small two-column stair, clear of the original coin placements.
-  { x: 4290, topY: 552, vines: false },
-  { x: 4323, topY: 552, vines: false },
-  { x: 4323, topY: 520, vines: false },
-  { x: 4323, topY: 488, vines: true },
+  // Raise the stair 8 px: its underside gaps are one/two full blocks.
+  { x: 4290, topY: 544, vines: false },
+  { x: 4323, topY: 544, vines: false },
+  { x: 4323, topY: 512, vines: false },
+  { x: 4323, topY: 480, vines: true },
   { x: 4527, topY: 488, vines: true },
   { x: 4593, topY: 488, vines: false },
   { x: 5613, topY: 488, vines: true },
@@ -34,7 +35,7 @@ export const BRICK_LAYOUT = [
 export const USED_BLOCK_LAYOUT = [
   { x: 626, topY: 488 }, { x: 905, topY: 488 },
   { x: 1589, topY: 488 }, { x: 2406, topY: 488 },
-  { x: 4219, topY: 488 }, { x: 4257, topY: 584 },
+  { x: 4219, topY: 488 }, { x: 4257, topY: 576 },
   { x: 4626, topY: 488 }, { x: 6266, topY: 488 },
 ];
 
@@ -138,27 +139,36 @@ export class BrickSystem {
 
   processContact(player, brick) {
     brick.breakOnImpact = false;
+    brick.headHits = [];
     if (this.scene.dead || !brick.body.enable) return false;
-    // Record the crossing while upward velocity is still available, but keep the
-    // static body enabled so Arcade separates Mario and stops his ascent first.
-    brick.breakOnImpact = this.scene.powered && brick.material === 'clay'
-      && isHitFromBelow(player.body, brick.body);
+    // Capture all clay undersides reached by this ascending sweep BEFORE any
+    // adjacent brick / question block separates the player and zeroes velocity.
+    // Keep solids enabled until the collide callback confirms the resolved hit.
+    if (this.scene.powered && isHitFromBelow(player.body, brick.body)) {
+      brick.headHits = (this.group?.getChildren() ?? [brick]).filter(candidate =>
+        candidate.material === 'clay' && candidate.body.enable
+        && isHitFromBelow(player.body, candidate.body));
+      brick.breakOnImpact = brick.headHits.includes(brick);
+    }
     return true;
   }
 
   finishContact(player, brick) {
-    const hit = brick.breakOnImpact;
+    const hits = brick.headHits ?? (brick.breakOnImpact ? [brick] : []);
+    brick.headHits = [];
     brick.breakOnImpact = false;
-    if (!hit || this.scene.dead || !brick.body.enable || !player.body.blocked.up
-      || player.body.y < brick.body.bottom - 0.01) return;
-    // Called AFTER Arcade separation: the head is below the underside and Y
-    // velocity is zero. Removing the ceiling now leaves ordinary gravity active.
-    player.setVelocityY(0);
-    brick.body.enable = false;
-    brick.setVisible(false);
-    this.spawnFragments(brick);
-    // Do not mutate group children during collision iteration.
-    brick.removalTimer = this.scene.time.delayedCall(0, () => brick.destroy());
+    if (this.scene.dead || !player.body.blocked.up) return;
+    for (const hit of hits) {
+      if (!hit.body.enable || Math.abs(player.body.y - hit.body.bottom) > 0.01) continue;
+      // Only the row actually reached after separation breaks. Solids higher
+      // up remain intact, and ordinary gravity resumes on the next step.
+      player.setVelocityY(0);
+      hit.body.enable = false;
+      hit.setVisible(false);
+      this.spawnFragments(hit);
+      // Do not mutate group children during collision iteration.
+      hit.removalTimer = this.scene.time.delayedCall(0, () => hit.destroy());
+    }
   }
 
   spawnFragments(brick) {

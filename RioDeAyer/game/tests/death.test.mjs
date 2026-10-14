@@ -151,6 +151,7 @@ test('Game Over accepts a fresh Enter or Space edge and ignores held keys', () =
 });
 
 test('create rebuilds nine hongos, four walking turtles and fifteen unused blocks', () => {
+  const collisionOrder = [];
   context.BrickSystem = class {
     constructor() { this.group = {}; this.remaining = 31; }
   };
@@ -160,7 +161,7 @@ test('create rebuilds nine hongos, four walking turtles and fifteen unused block
   context.Phaser.Core = { Events: { BLUR: 'blur' } };
   context.Phaser.Scenes = { Events: { SHUTDOWN: 'shutdown', PRE_RENDER: 'prerender' } };
   context.EnemySystem = class {
-    constructor() { this.spawns = []; }
+    constructor() { this.spawns = []; collisionOrder.push('enemy-overlap'); }
     spawnHongo(x, y) { this.spawns.push({ x, y, enemyState: 'walking' }); }
     spawnTortuga(x, y, direction = -1) {
       this.spawns.push({ x, y, direction, enemyType: 'tortuga', enemyState: 'walking' });
@@ -183,7 +184,9 @@ test('create rebuilds nine hongos, four walking turtles and fifteen unused block
   scene.physics = {
     world: { setBounds() {} },
     add: {
-      staticGroup: () => ({ add() {} }), collider: () => ({ active: true }),
+      staticGroup: () => ({ add() {} }), collider: () => {
+        collisionOrder.push('solid'); return { active: true };
+      },
       sprite(x, y) {
         return { x, y, body: { setSize() { return this; }, setOffset() { return this; } },
           setCollideWorldBounds() { return this; }, setBounce() { return this; } };
@@ -197,6 +200,8 @@ test('create rebuilds nine hongos, four walking turtles and fifteen unused block
   scene.events = events;
   scene.init();
   scene.create();
+  assert.ok(collisionOrder.lastIndexOf('solid') < collisionOrder.indexOf('enemy-overlap'),
+    'enemy overlap is registered after every solid collider');
   const oldPlayer = scene.player;
   const oldEnemies = scene.enemies;
   const oldBlocks = scene.powerUps;
