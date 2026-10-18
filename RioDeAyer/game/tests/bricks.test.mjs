@@ -11,16 +11,17 @@ const arcade = name => require(fileURLToPath(new URL(`../../node_modules/phaser/
 const Body = arcade('Body');
 const StaticBody = arcade('StaticBody');
 const World = arcade('World');
+const EventEmitter = require('eventemitter3');
 
 const context = vm.createContext({ Phaser: { Scene: class {} } });
 const load = name => readFileSync(new URL(`../src/${name}.js`, import.meta.url), 'utf8')
   .replace(/^import .*;\r?\n/gm, '').replace(/export /g, '');
-vm.runInContext(load('powerups') + load('bricks') + `
-  globalThis.api = { BrickSystem, PowerUpSystem, makeBrickTextures, BRICK_LAYOUT, USED_BLOCK_LAYOUT, BRICK_WIDTH, BRICK_HEIGHT };`, context);
+vm.runInContext(load('coins') + load('powerups') + load('bricks') + `
+  globalThis.api = { CoinSystem, BrickSystem, PowerUpSystem, makeBrickTextures, BRICK_LAYOUT, USED_BLOCK_LAYOUT, BRICK_WIDTH, BRICK_HEIGHT };`, context);
 vm.runInContext(load('main').split('new Phaser.Game(')[0] + `
   globalThis.Playground = Playground;
   globalThis.layout = { QUESTION_BLOCKS, LEVEL_SURFACES, RIVER_GAPS, WORLD_WIDTH };`, context);
-const { BrickSystem, PowerUpSystem, makeBrickTextures, BRICK_LAYOUT, USED_BLOCK_LAYOUT, BRICK_WIDTH, BRICK_HEIGHT } = context.api;
+const { CoinSystem, BrickSystem, PowerUpSystem, makeBrickTextures, BRICK_LAYOUT, USED_BLOCK_LAYOUT, BRICK_WIDTH, BRICK_HEIGHT } = context.api;
 const layout = JSON.parse(JSON.stringify(context.layout));
 
 function contact(powered = true, material = 'clay') {
@@ -38,11 +39,14 @@ function contact(powered = true, material = 'clay') {
       particles.push(particle); return particle;
     } } },
   };
-  const system = Object.assign(Object.create(BrickSystem.prototype), { scene, fragments:new Set() });
+  const system = Object.assign(Object.create(BrickSystem.prototype), { scene, fragments:new Set(), hitBricks:new Set() });
   const world = Object.assign(Object.create(World.prototype), {
     defaults:{}, bounds:{}, gravity:{x:0,y:1600}, OVERLAP_BIAS:4, _total:0,
     staticTree:{insert(){},remove(){}},
   });
+  EventEmitter.call(world);
+  scene.physics.world = world;
+  world.on('worldstep', () => system.hitBricks.clear());
   const body = new Body(world);
   body.setSize(32,64,false);
   body.x=544; body.y=526; body.prev.set(544,537); body._dy=-11;
@@ -340,12 +344,16 @@ test('used blocks spawn with the exact exhausted question frame, stay solid and 
   const scene={powered:true,dead:false,textures:{exists:()=>true},events:{once(){}},
     add:{image(x,y,key,frame){const image={x,y,key,frame,
       setOrigin(){return this;},setDepth(){return this;}}; images.push(image);return image;}},
-    physics:{add:{staticGroup:()=>group,collider(player,solids,onCollide,onProcess){
+    physics:{world:{on(){},off(){}},add:{staticGroup:()=>group,collider(player,solids,onCollide,onProcess){
       collide=onCollide;process=onProcess;return {};
     }}},
   };
   const system=new BrickSystem(scene,{});
   assert.equal(images.filter(b=>b.material==='clay').length,23);
+  const secrets=images.filter(b=>b.coinsRemaining>0);
+  assert.equal(secrets.length,2);
+  assert.deepEqual(secrets.map(b=>b.coinsRemaining).sort(),[4,5]);
+  assert.ok(secrets.every(b=>b.key==='mud-brick' && b.frame===undefined));
   const metals=images.filter(b=>b.material==='used-metal');
   assert.equal(metals.length,8);
   for(const metal of metals) {
@@ -357,4 +365,144 @@ test('used blocks spawn with the exact exhausted question frame, stay solid and 
     assert.equal(metal.body.enable,true);
   }
   assert.equal(system.fragments.size,0);
+});
+
+function rewardContact(powered, limit) {
+  const fixture = contact(powered);
+  const { scene, system, brick } = fixture;
+  scene.coins = 98;
+  scene.lives = 3;
+  scene.coinsText = { setText(value) { this.value = value; } };
+  scene.livesText = { setText(value) { this.value = value; } };
+  scene.addCoin = context.Playground.prototype.addCoin;
+  const rewards = fixture.rewards = [];
+  const tweens = fixture.tweens = [];
+  scene.add = { sprite(x, y, key, frame) {
+    const coin = { x, y, key, frame,
+      setDepth(depth) { this.depth = depth; return this; },
+      setVisible(visible) { this.visible = visible; return this; },
+      play(animation) { this.animation = animation; return this; },
+      destroy() { this.destroyed = true; },
+    };
+    rewards.push(coin);
+    return coin;
+  } };
+  scene.tweens = { add(config) { tweens.push(config); } };
+  scene.coinSystem = Object.assign(Object.create(CoinSystem.prototype), { scene });
+  system.group = { getChildren: () => [brick] };
+  brick.coinsRemaining = limit;
+  fixture.hit = () => {
+    const { player, world } = fixture;
+    world.emit('worldstep');
+    player.body.resetFlags();
+    player.body.x = player.body.prev.x = 544;
+    player.body.y = 526;
+    player.body.prev.y = 537;
+    player.body._dy = -11;
+    player.body.velocity.y = -500;
+    return world.collide(player, brick,
+      (p, b) => system.finishContact(p, b), (p, b) => system.processContact(p, b));
+  };
+  return fixture;
+}
+
+test('both secret bricks award exactly one coin per real underside hit, respect 4/5 limits and then require strength to break', () => {
+  const limits = BRICK_LAYOUT.filter(b => b.hiddenCoins).map(b => b.hiddenCoins);
+  for (const limit of limits) {
+    for (const powered of [false, true]) {
+      const f = rewardContact(powered, limit);
+      for (let i = 1; i <= limit; i++) {
+        assert.equal(f.hit(), true);
+        assert.equal(f.rewards.length, i);
+        assert.equal(f.brick.coinsRemaining, limit - i);
+        assert.equal(f.scene.coins, (98 + i) % 100);
+        assert.equal(f.scene.coinsText.value, `x${String((98 + i) % 100).padStart(2, '0')}`);
+        assert.equal(f.scene.lives, i < 2 ? 3 : 4);
+        assert.equal(f.brick.body.enable, true, 'even the final reward hit keeps the brick solid');
+        assert.equal(f.particles.length, 0);
+        // Repeated process/collide calls and another neighbor's cached hit
+        // in this same physics step cannot duplicate the reward or break it.
+        f.system.processContact(f.player, f.brick);
+        f.system.finishContact(f.player, f.brick);
+        f.system.finishContact(f.player, { headHits: [f.brick] });
+        f.scene.coinSystem.reward(f.rewards.at(-1));
+        assert.equal(f.rewards.length, i);
+        assert.equal(f.scene.coins, (98 + i) % 100);
+        assert.equal(f.brick.body.enable, true);
+      }
+      assert.equal(f.scene.livesText.value, 'VIDAS × 4');
+      f.hit();
+      assert.equal(f.rewards.length, limit);
+      assert.equal(f.brick.body.enable, !powered);
+      assert.equal(f.particles.length, powered ? 4 : 0);
+      if (!powered) {
+        f.scene.powered = true;
+        f.hit();
+        assert.equal(f.brick.body.enable, false);
+        assert.equal(f.particles.length, 4);
+      }
+      assert.equal(f.brick.coinsRemaining, 0);
+      assert.equal(f.rewards.length, limit, 'no reward after exhaustion');
+      for (const [i, tween] of f.tweens.entries()) {
+        const coin = f.rewards[i];
+        assert.equal(coin.cameraFilter, f.brick.cameraFilter);
+        assert.equal(coin.visible, true);
+        assert.equal(coin.body, undefined, 'reward cannot be collected by overlap again');
+        assert.equal(coin.animation, 'peso-spin');
+        assert.equal(tween.y, coin.y - 64);
+        assert.equal(tween.yoyo, true);
+        tween.onComplete();
+        assert.equal(coin.destroyed, true);
+      }
+    }
+  }
+});
+
+test('secret rewards ignore dead players, descending, side and top contacts', () => {
+  for (const invalid of ['dead', 'descending', 'side', 'top']) {
+    const f = rewardContact(false, 4);
+    if (invalid === 'dead') f.scene.dead = true;
+    if (invalid === 'descending') f.player.body.velocity.y = 500;
+    if (invalid === 'side') f.player.body.prev.y = 510;
+    if (invalid === 'top') {
+      f.player.body.y = 440;
+      f.player.body.prev.y = 430;
+      f.player.body.velocity.y = 500;
+    }
+    f.world.collide(f.player, f.brick,
+      (p, b) => f.system.finishContact(p, b), (p, b) => f.system.processContact(p, b));
+    assert.equal(f.rewards.length, 0, invalid);
+    assert.equal(f.scene.coins, 98);
+    assert.equal(f.brick.coinsRemaining, 4);
+    assert.equal(f.brick.body.enable, true);
+  }
+});
+
+test('shared edges award a secret coin once regardless of neighbor order, strength or frame rate', () => {
+  for (const powered of [false, true]) {
+    for (const fps of [30, 60, 120]) {
+      for (const first of ['neighbor', 'secret']) {
+        const f = rewardContact(powered, 1);
+        const neighborBody = new StaticBody(f.world);
+        neighborBody.setSize(33, 32, false);
+        neighborBody.x = f.brick.body.right;
+        neighborBody.y = f.brick.body.y;
+        const neighbor = { material: 'used-metal', body: neighborBody };
+        neighborBody.gameObject = neighbor;
+        const b = f.player.body;
+        b.x = f.brick.body.right - 15;
+        b.y = f.brick.body.bottom + 2;
+        b.velocity.set(0, -650);
+        b.update(1 / fps);
+        const collide = solid => f.world.collide(f.player, solid,
+          (p, s) => f.system.finishContact(p, s), (p, s) => f.system.processContact(p, s));
+        for (const solid of first === 'neighbor' ? [neighbor, f.brick] : [f.brick, neighbor]) collide(solid);
+        assert.equal(f.rewards.length, 1, `${fps} FPS, ${first}, strength ${powered}`);
+        assert.equal(f.scene.coins, 99);
+        assert.equal(f.brick.body.enable, true);
+        assert.equal(b.velocity.y, 0);
+        assert.equal(b.y, f.brick.body.bottom);
+      }
+    }
+  }
 });

@@ -19,8 +19,112 @@ río de 112 px, tres bloques bajos y río de 152 px. Hay suelo despejado
 antes y después de los cruces y un tramo final libre. Todo se puede superar
 caminando y saltando: correr y deslizarse son opcionales. Las caídas y los
 impactos con enemigos descuentan una vida y reinician el nivel completo.
-No hay secretos ni transición final.
-El tronco es únicamente un cuerpo sólido sin interacción.
+El primer tocón corto permite visitar una habitación secreta (ver abajo).
+Los troncos horizontales y los demás tocones siguen siendo plataformas normales.
+
+## Tocones y árboles secos del nivel 1-1
+
+Se sumaron tres tocones cortados de 36, 52 y 68 px de alto, cerca de x=1828,
+3792 y 6576, y dos árboles secos quebrados de 112 y 116 px en x=3348 y 4392.
+Se distribuyen a lo largo del recorrido completo de 6720 px.
+La apertura sigue despejada y se dejan al menos 100 px libres junto a los ríos.
+
+`WOODLAND_OBSTACLES` en `src/main.js` define los perfiles escalonados: copa
+plana, hombros y raíces. Cada tramo genera un cuerpo estático en
+`LEVEL_SURFACES`; `src/landscape.js` pinta todos los troncos con una única
+paleta de marrones cálidos (`LOG_WOOD`), corteza oscura, vetas y anillos
+dentro de esos mismos rectángulos, a la escala pixel art
+del paisaje. Las alturas permiten subir con el salto normal y caminar o
+quedarse parado arriba. No se modifican la física, los controles, la cámara
+ni los sprites existentes; no hay escalada, agarres ni plataformas móviles.
+Sólo el primer tocón corto tiene una entrada secreta.
+
+Los troncos horizontales conservan su paleta marrón, vetas y anillos originales.
+Sus extremos tienen pequeñas muescas y astillas de corteza dibujadas dentro de
+las dimensiones existentes; la línea superior transitable permanece completa.
+Los tocones y árboles secos altos comparten esos marrones y colores de madera
+cortada. `deadwood` dibuja las cinco piezas verticales y todas usan `hollowCut`
+para su abertura superior: cavidad asimétrica casi negra, pared interior marrón
+y borde grueso de madera clara. `woodCut` sólo prepara la madera del borde,
+sin dejar una variante vertical maciza. `makeLandscape`, en la rama
+`kind === 'log'`, dibuja los tres troncos horizontales, incluidos los originales.
+No queda una paleta gris alternativa para ninguna de estas variantes.
+La lámina [preview-troncos-1-1.png](preview-troncos-1-1.png) muestra las ocho
+piezas identificadas por tipo y coordenada, capturadas dentro del juego.
+Los tres tocones de x=1828, 3792 y 6576 y los dos troncos altos de x=3348 y
+4392 son huecos visualmente, sin excepciones por posición. Las pequeñas muescas
+de corteza y diferencias de altura recortan sólo un píxel del contorno dibujado;
+la línea central de apoyo permanece visible. Se conserva toda la geometría
+física y la paleta exacta anterior. La comparación del arte está en
+[preview-tocones-verticales.png](preview-tocones-verticales.png).
+Este ajuste es únicamente gráfico: no cambia posiciones ni colisiones.
+
+## Primera habitación secreta
+
+La entrada es el **primer tocón corto**, que ocupa x=1828–1920 (copa en
+y=604), después del tronco horizontal de x=1656 y antes del primer río.
+Saltar encima, quedarse centrado sobre la abertura oscura (maRio en x≈1873)
+y pulsar **↓ o S**. La entrada requiere una pulsación nueva y apoyo sobre
+esa copa; mantener abajo desde antes de aterrizar no activa el secreto.
+
+El descenso dura 1,3 segundos. Se usa la pose idle original, desplazada
+gradualmente y recortada detrás del borde delantero de madera, sin alterar
+la textura del tocón, el sprite ni la hitbox. Durante la entrada se bloquean
+el movimiento y las interacciones físicas. Al desaparecer, un fundido de
+180 ms abre una habitación cerrada de tierra compactada, piedras y raíces.
+
+Hay **exactamente 15 monedas** y ningún enemigo, bloque ni otro premio.
+Caminar y saltar normalmente permite recogerlas todas. El contador y las
+vidas usan el mismo estado del HUD: cada 100 monedas sigue otorgando una vida.
+Las cuatro paredes físicas contienen al personaje. F2 permite inspeccionarlas.
+
+La **enredadera verde de la pared derecha** es la salida: acercarse y pulsar
+**↑ o W**. No hace falta escalar ni estar en una altura particular. Espacio
+sigue saltando. El tallo sinuoso, las hojas puntiagudas de tamaños y posiciones
+variados y las ramificaciones y raíces se dibujan en píxeles enteros de colores
+sólidos, sin cambiar las paredes ni la ubicación de la salida.
+Al activarla, maRio se alinea con la planta y trepa un tramo de 32 px durante
+650 ms, alternando las poses existentes `walk-1` y `walk-2`. Durante la trepada
+y el fundido se bloquean los controles y el cuerpo físico. La salida sólo se
+activa una vez. Tras el fundido habitual de 180 ms, vuelve sobre la misma copa, con
+los pies en y=604 y velocidad cero. Probar de nuevo ↓/S sólo lo agacha: la
+entrada queda utilizada durante el resto de ese intento del nivel, aunque
+queden monedas sin recoger dentro. Reiniciar por completo el nivel (incluida
+la reconstrucción tras perder una vida) o empezar una partida nueva restablece
+la entrada y sus monedas, siguiendo el reinicio completo ya existente.
+
+`src/secret-room.js` contiene la entrada de un uso, el registro de recogidas,
+la geometría y el arte del subsuelo. `Underground` en `src/main.js` reutiliza
+los controles, la física, las hitboxes, las animaciones y el HUD existentes.
+La escena `Playground` queda pausada durante la visita y se reanuda sin
+reconstruirla: se conservan sus monedas retiradas, bloques usados o rotos,
+enemigos derrotados, temporizadores, vidas y poder activo. `CoinSystem`
+acepta una distribución y un registro de monedas opcionales para reutilizar
+las mismas reglas de recogida en ambas escenas.
+
+Prueba manual: recoger una moneda y activar un bloque antes de entrar;
+visitar el subsuelo, recoger sus monedas y salir por la enredadera; verificar
+que el contador sumó las recogidas, que el bloque sigue usado y la moneda
+exterior no reaparece. Volver a pulsar ↓/S sobre la abertura y comprobar que
+no hay otra visita. Los otros cuatro árboles huecos no aceptan entrada.
+
+`tests/secret-room.test.mjs` cubre entrada con ↓/S, descenso progresivo,
+salida con ↑/W, conservación de objetos y progreso, bloqueo de reentrada,
+recogidas únicas, vidas por 100 monedas, saltos alcanzables y límites sólidos
+con Arcade a 30, 60 y 120 FPS. Incluye la duración, el ascenso corto y las poses
+de trepada, la transición única y la conservación de monedas, vidas y saldo de
+ladrillos secretos al regresar. El reinicio completo también se comprueba en
+`tests/death.test.mjs`.
+
+Capturas verificadas dentro del juego:
+[descenso por el tocón](preview-secret-entry.png) y
+[habitación con las 15 monedas](preview-secret-room.png).
+
+Para revisar el apoyo y los bordes, usar **F2** o `?debugPhysics=1` y recorrer
+los cinco sectores. Las pruebas de movimiento verifican saltos desde ambos
+lados, apoyo quieto, caminata y salida por los bordes a 30, 60 y 120 FPS.
+`tests/woodland.test.mjs` comprueba además la coincidencia entre píxeles y
+colisiones, la distribución, las distancias a ríos y el espacio bajo bloques.
 
 `LEVEL_SURFACES` define tanto el terreno dibujado como las colisiones estáticas.
 Los gráficos provisionales se dibujan con Canvas: barranca, pasto, tronco y agua;
@@ -123,10 +227,28 @@ que Phaser ya haya destruido durante el cierre de la escena.
 conservan una escala común en frames de 24 × 24; se combinan con sus reflejos
 para animar la rotación. La fila inferior con destellos no se usa.
 
-Hay 22 monedas flotantes: sobre el camino, plataformas y en arcos que guían
-los saltos de ambos ríos. Tocarlas las retira inmediatamente y suma una unidad.
-Los dos bloques con moneda dan la recompensa automáticamente al activarse,
-con una animación breve hacia arriba; el bloque del hongo blanco conserva el hongo.
+Hay **15 monedas visibles en el escenario principal** distribuidas entre el
+camino, las plataformas y los cuatro cruces de río, más las **15 de la habitación
+secreta**: exactamente 30 colocadas inicialmente. Tocarlas las retira inmediatamente
+y suma una unidad. Las monedas de los bloques `?` se conservan como premios
+adicionales, con su animación breve hacia arriba; los bloques con hongo mantienen
+su recompensa original.
+
+Dos ladrillos de barro existentes contienen monedas ocultas: uno entrega 4 y
+el otro 5. Usan la misma textura, tamaño y cuerpo estático que los ladrillos
+normales. Cada golpe ascendente válido desde abajo entrega una sola moneda,
+incluso sin el poder de fuerza, y reutiliza la animación de recompensa de los
+bloques `?`. El premio hereda el filtro de cámaras del ladrillo y no tiene
+cuerpo de recogida que permita contarlo otra vez. Los callbacks de un mismo
+paso físico no pueden duplicar el premio ni romper el ladrillo al dar su última
+moneda. Agotado el saldo, un golpe posterior sólo lo rompe si maRio tiene fuerza,
+con los mismos fragmentos y colisiones de siempre. Estos 9 premios ocultos y los
+premios de los bloques `?` no forman parte de las 30 monedas visibles.
+
+`tests/bricks.test.mjs` comprueba golpes únicos, límites de ambos ladrillos,
+agotamiento y rotura posterior, contactos inválidos, contador y vida extra,
+animación de premios y colisiones junto a bloques vecinos a 30, 60 y 120 FPS.
+`tests/level.test.mjs` verifica el reparto de las 30 monedas visibles.
 
 El HUD muestra x00–x99. Cada 100 monedas el contador vuelve a x00 y se otorga
 una vida, también en vueltas posteriores. Morir conserva el saldo y las vidas

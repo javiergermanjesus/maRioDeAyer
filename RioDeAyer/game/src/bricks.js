@@ -11,7 +11,7 @@ export const BRICK_LAYOUT = [
   { x: 872, topY: 488, vines: true },
   { x: 1457, topY: 488, vines: true },
   { x: 1523, topY: 488, vines: true },
-  { x: 1556, topY: 488, vines: false },
+  { x: 1556, topY: 488, vines: false, hiddenCoins: 4 },
   { x: 2307, topY: 488, vines: false },
   { x: 2373, topY: 488, vines: true },
   { x: 3897, topY: 488, vines: true },
@@ -23,7 +23,7 @@ export const BRICK_LAYOUT = [
   { x: 4323, topY: 512, vines: false },
   { x: 4323, topY: 480, vines: true },
   { x: 4527, topY: 488, vines: true },
-  { x: 4593, topY: 488, vines: false },
+  { x: 4593, topY: 488, vines: false, hiddenCoins: 5 },
   { x: 5613, topY: 488, vines: true },
   { x: 5646, topY: 488, vines: false },
   { x: 5807, topY: 472, vines: true },
@@ -106,12 +106,18 @@ export class BrickSystem {
   constructor(scene, player) {
     this.scene = scene;
     this.fragments = new Set();
+    // Neighboring solids can report the same head sweep. Consume each brick
+    // once per Arcade step, including the hit that delivers its final coin.
+    this.hitBricks = new Set();
+    const clearHits = () => this.hitBricks.clear();
+    scene.physics.world.on('worldstep', clearHits);
     makeBrickTextures(scene);
     this.group = scene.physics.add.staticGroup();
-    for (const { x, topY, vines } of BRICK_LAYOUT) {
+    for (const { x, topY, vines, hiddenCoins = 0 } of BRICK_LAYOUT) {
       const brick = scene.add.image(x, topY, vines ? 'mud-brick-vines' : 'mud-brick')
         .setOrigin(0.5, 0).setDepth(2);
       brick.material = 'clay';
+      brick.coinsRemaining = hiddenCoins;
       this.group.add(brick);
     }
     for (const { x, topY } of USED_BLOCK_LAYOUT) {
@@ -124,6 +130,7 @@ export class BrickSystem {
       (mario, brick) => this.finishContact(mario, brick),
       (mario, brick) => this.processContact(mario, brick));
     scene.events.once('shutdown', () => {
+      scene.physics.world.off('worldstep', clearHits);
       if (this.collider.world) this.collider.destroy();
       for (const fragment of this.fragments) {
         fragment.removalTimer.remove(false);
@@ -144,9 +151,10 @@ export class BrickSystem {
     // Capture all clay undersides reached by this ascending sweep BEFORE any
     // adjacent brick / question block separates the player and zeroes velocity.
     // Keep solids enabled until the collide callback confirms the resolved hit.
-    if (this.scene.powered && isHitFromBelow(player.body, brick.body)) {
+    if (isHitFromBelow(player.body, brick.body)) {
       brick.headHits = (this.group?.getChildren() ?? [brick]).filter(candidate =>
         candidate.material === 'clay' && candidate.body.enable
+        && (this.scene.powered || candidate.coinsRemaining > 0)
         && isHitFromBelow(player.body, candidate.body));
       brick.breakOnImpact = brick.headHits.includes(brick);
     }
@@ -160,9 +168,21 @@ export class BrickSystem {
     if (this.scene.dead || !player.body.blocked.up) return;
     for (const hit of hits) {
       if (!hit.body.enable || Math.abs(player.body.y - hit.body.bottom) > 0.01) continue;
+      this.hitBricks ??= new Set();
+      if (this.hitBricks.has(hit)) continue;
+      this.hitBricks.add(hit);
+      player.setVelocityY(0);
+      if (hit.coinsRemaining > 0) {
+        hit.coinsRemaining--;
+        const coin = this.scene.coinSystem.createReward(hit.x, hit.y);
+        // This sprite is allocated after the cameras were filtered at create.
+        coin.cameraFilter = hit.cameraFilter;
+        this.scene.coinSystem.reward(coin);
+        continue;
+      }
+      if (!this.scene.powered) continue;
       // Only the row actually reached after separation breaks. Solids higher
       // up remain intact, and ordinary gravity resumes on the next step.
-      player.setVelocityY(0);
       hit.body.enable = false;
       hit.setVisible(false);
       this.spawnFragments(hit);

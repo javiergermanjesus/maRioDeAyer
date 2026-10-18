@@ -20,7 +20,8 @@ const context = vm.createContext({ Phaser: {
   } } },
 } });
 vm.runInContext(source.replace(/^import .*;\r?\n/gm, '').split('new Phaser.Game(')[0]
-  + '\nglobalThis.Playground = Playground; globalThis.standingHeight = PLAYER_STANDING_HEIGHT;', context);
+  + '\nglobalThis.Playground = Playground; globalThis.standingHeight = PLAYER_STANDING_HEIGHT;'
+  + '\nglobalThis.woodlandSurfaces = LEVEL_SURFACES.filter(s => s.treeIndex !== undefined);', context);
 vm.runInContext(readFileSync(new URL('../src/bricks.js', import.meta.url), 'utf8')
   .replace(/^import .*;\r?\n/gm, '').replace(/export /g, '')
   + '\nglobalThis.stair = [...BRICK_LAYOUT, ...USED_BLOCK_LAYOUT].filter(b => b.x >= 4257 && b.x <= 4323);', context);
@@ -71,6 +72,91 @@ function solid(scene, x, y, width, height) {
   body.gameObject = object;
   return object;
 }
+
+const woodlandTrees = Object.groupBy(Array.from(context.woodlandSurfaces), s => s.treeIndex);
+
+test('normal walking jumps land on every deadwood crown from either side at 30, 60 and 120 FPS', () => {
+  for (const sections of Object.values(woodlandTrees)) {
+    for (const fps of [30, 60, 120]) {
+      const dt = 1 / fps;
+      const crown = sections[0];
+      // Predict the descending crossing using the unchanged semi-implicit
+      // Arcade gravity step, then aim a walking jump at the crown's center.
+      let feet = 640, velocity = -650, frames = 0;
+      do {
+        velocity += 1600 * dt;
+        feet += velocity * dt;
+        frames++;
+      } while (velocity < 0 || feet < crown.y);
+      for (const direction of [-1, 1]) {
+        const s = setup();
+        s.player.x = crown.x + crown.width / 2 - direction * 280 * frames * dt;
+        s.player.body.updateFromGameObject();
+        const solids = [solid(s, 0, 640, 7000, 80),
+          ...sections.map(r => solid(s, r.x, r.y, r.width, r.height))];
+        s.surfaces = { getChildren: () => solids };
+        s.keys[direction < 0 ? 'A' : 'D'].isDown = true;
+        s.player.body.velocity.x = direction * 280;
+        s.keys.SPACE.edge = true;
+        s.tick(1, dt * 1000);
+        assert.equal(s.player.body.velocity.y, -650);
+        let landed = false;
+        for (let frame = 0; frame <= frames + 2; frame++) {
+          s.player.body.preUpdate(true, dt);
+          for (const object of solids) s.physics.world.collide(s.player, object);
+          s.tick(1, dt * 1000);
+          s.player.body.postUpdate();
+          if (s.player.body.blocked.down) {
+            assert.equal(s.player.body.bottom, crown.y,
+              `tree ${crown.treeIndex}, ${fps} FPS, direction ${direction}`);
+            landed = true;
+            break;
+          }
+        }
+        assert.equal(landed, true, 'a normal jump reaches the visible crown');
+      }
+    }
+  }
+});
+
+test('deadwood supports idle and walking feet, then allows walking off each side without snagging', () => {
+  for (const sections of Object.values(woodlandTrees)) {
+    for (const fps of [30, 60, 120]) {
+      for (const direction of [-1, 1]) {
+        const s = setup();
+        const crown = sections[0];
+        s.player.x = crown.x + crown.width / 2;
+        s.player.y = crown.y - 32;
+        s.player.body.updateFromGameObject();
+        const solids = [solid(s, 0, 640, 7000, 80),
+          ...sections.map(r => solid(s, r.x, r.y, r.width, r.height))];
+        s.surfaces = { getChildren: () => solids };
+        const step = () => {
+          s.player.body.preUpdate(true, 1 / fps);
+          for (const object of solids) s.physics.world.collide(s.player, object);
+          s.tick(1, 1000 / fps);
+          s.player.body.postUpdate();
+        };
+        for (let frame = 0; frame < fps; frame++) {
+          step();
+          assert.equal(s.player.body.bottom, crown.y, 'idle feet stay on the visible cut');
+          assert.equal(s.movementState, 'idle');
+        }
+        const start = s.player.x;
+        s.keys[direction < 0 ? 'A' : 'D'].isDown = true;
+        for (let frame = 0; frame < fps / 10; frame++) {
+          step();
+          assert.equal(s.player.body.bottom, crown.y, 'walking keeps the same support line');
+          assert.equal(s.movementState, 'walk');
+        }
+        assert.ok(direction * (s.player.x - start) > 3);
+        for (let frame = 0; frame < fps; frame++) step();
+        assert.equal(s.player.body.bottom, 640, 'stepped roots do not trap the player on exit');
+        assert.ok(direction * (s.player.x - start) > 150);
+      }
+    }
+  }
+});
 
 test('crouch and stand preserve the feet, sprite and Arcade postUpdate displacement', () => {
   const s = setup();

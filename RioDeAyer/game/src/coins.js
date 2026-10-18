@@ -12,19 +12,10 @@ export const COIN_REGIONS = [
 ];
 
 export const COIN_SPAWNS = [
-  [650, 606], [800, 606],
-  [990, 566], [1050, 566], [1280, 534], [1340, 534],
-  [1690, 550], [1750, 550],
-  [1980, 548], [2050, 510], [2120, 548],
-  [2230, 606], [2510, 558], [2570, 558],
-  [2795, 518], [2865, 518], [3090, 550],
-  [3475, 532], [3565, 492], [3655, 532],
-  [4040, 606], [4200, 606],
-  // Mix a ground pickup, a short rising arc, a log reward and river crossings.
-  [4520, 606], [4510, 550], [4580, 526], [4872, 550], [4936, 550],
-  [5030, 548], [5144, 510], [5250, 548], [5420, 534], [5490, 534],
-  [5680, 574], [5800, 554], [5920, 548], [6052, 504], [6170, 548],
-  [6280, 558], [6344, 558], [6440, 606], [6590, 546],
+  // Fifteen visible pickups across the full route; block rewards are additional.
+  [650, 606], [990, 566], [1280, 534], [1690, 550], [2050, 510],
+  [2510, 558], [2795, 518], [3090, 550], [3565, 492], [4040, 606],
+  [4520, 606], [5144, 510], [5490, 534], [6052, 504], [6590, 546],
 ];
 
 export function preloadCoins(scene) {
@@ -58,12 +49,15 @@ function makeCoinTexture(scene) {
 }
 
 export class CoinSystem {
-  constructor(scene, player) {
+  constructor(scene, player, spawns = COIN_SPAWNS, collected = new Set()) {
     this.scene = scene;
+    this.collected = collected;
     makeCoinTexture(scene);
     this.group = scene.physics.add.group({ allowGravity: false, immovable: true });
-    for (const [x, y] of COIN_SPAWNS) {
+    for (const [id, [x, y]] of spawns.entries()) {
+      if (collected.has(id)) continue;
       const coin = this.group.create(x, y, 'peso-coin', 0).setDepth(1);
+      coin.pickupId = id;
       coin.body.setSize(20, 22).setOffset(2, 1);
       coin.play('peso-spin');
     }
@@ -78,6 +72,7 @@ export class CoinSystem {
   collect(coin) {
     if (this.scene.dead || !coin.active || coin.collected) return;
     coin.collected = true;
+    this.collected?.add(coin.pickupId);
     coin.body.enable = false;
     coin.destroy();
     this.scene.addCoin();

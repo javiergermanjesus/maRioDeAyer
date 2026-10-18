@@ -11,10 +11,11 @@ vm.runInContext(load('main').split('new Phaser.Game(')[0] + `
     RIVER_GAPS, QUESTION_BLOCKS, ENEMY_SPAWNS, TURTLE_SPAWNS,
     EXTENSION_HONGO_SPAWNS, EXTENSION_TURTLE_SPAWNS };`, context);
 vm.runInContext(load('coins') + '\nglobalThis.coins = COIN_SPAWNS;', context);
+vm.runInContext(load('secret-room') + '\nglobalThis.roomCoins = ROOM_COINS;', context);
 const level = JSON.parse(JSON.stringify(context.level));
 const coins = JSON.parse(JSON.stringify(context.coins));
 
-test('extension stays 50% longer and preserves original terrain, single blocks and coins', () => {
+test('extension stays 50% longer and preserves original terrain and single blocks', () => {
   assert.equal(level.ORIGINAL_WORLD_WIDTH, 4480);
   assert.equal(level.WORLD_WIDTH, 6720);
   assert.deepEqual(level.LEVEL_SURFACES.slice(0, 9), [
@@ -36,12 +37,21 @@ test('extension stays 50% longer and preserves original terrain, single blocks a
     { x: 2340, topY: 488, hasMushroom: false },
     { x: 3930, topY: 488, hasMushroom: false, hasCoin: true },
   ]);
-  assert.deepEqual(coins.slice(0, 22), [
-    [650, 606], [800, 606], [990, 566], [1050, 566], [1280, 534], [1340, 534],
-    [1690, 550], [1750, 550], [1980, 548], [2050, 510], [2120, 548], [2230, 606],
-    [2510, 558], [2570, 558], [2795, 518], [2865, 518], [3090, 550],
-    [3475, 532], [3565, 492], [3655, 532], [4040, 606], [4200, 606],
-  ]);
+});
+
+test('exactly 30 initially visible coins: 15 in the room and 15 spread across the main route', () => {
+  assert.equal(coins.length, 15);
+  assert.equal(context.roomCoins.length, 15);
+  assert.equal(coins.length + context.roomCoins.length, 30);
+  assert.equal(new Set(coins.map(([x, y]) => `${x},${y}`)).size, 15);
+  assert.ok(coins[0][0] < 960 && coins.at(-1)[0] > 6400);
+  for (const [i, [x, y]] of coins.entries()) {
+    assert.ok(x > 0 && x < level.WORLD_WIDTH && y < level.GROUND_Y);
+    if (i) assert.ok(x > coins[i - 1][0] && x - coins[i - 1][0] < 800);
+  }
+  for (const gap of level.RIVER_GAPS) {
+    assert.ok(coins.some(([x]) => Math.abs(x - (gap.x + gap.width / 2)) < 180), 'each river has a visible cue');
+  }
 });
 
 test('ground covers the entire world except river gaps, with a seamless extension boundary', () => {
@@ -62,7 +72,7 @@ test('new obstacles are within normal jump reach and new enemies have safe suppo
   for (const gap of level.RIVER_GAPS) {
     assert.ok(gap.width + 40 < range, 'jump has horizontal margin without running');
   }
-  for (const surface of level.LEVEL_SURFACES.slice(9)) {
+  for (const surface of level.LEVEL_SURFACES.slice(9).filter(s => s.treeIndex === undefined)) {
     assert.ok(surface.x >= 4480 && surface.x + surface.width <= 6720);
     assert.ok(640 - surface.y < height);
     assert.ok(!level.RIVER_GAPS.some(g => surface.x < g.x + g.width && surface.x + surface.width > g.x));
@@ -78,8 +88,7 @@ test('new obstacles are within normal jump reach and new enemies have safe suppo
     assert.ok(!level.LEVEL_SURFACES.some(s => s.y < 640 && x + 18 > s.x && x - 18 < s.x+s.width));
     assert.ok(level.RIVER_GAPS.every(g => Math.min(Math.abs(x-g.x), Math.abs(x-g.x-g.width)) >= 120));
   }
-  assert.equal(coins.length, 41);
-  assert.ok(coins.slice(22).every(([x,y]) => x >= 4480 && x < 6720 && y < 640));
+  assert.ok(coins.filter(([x]) => x >= 4480).length >= 5);
   assert.ok(level.QUESTION_BLOCKS.every(b => b.x > 0 && b.x < 6720));
 });
 

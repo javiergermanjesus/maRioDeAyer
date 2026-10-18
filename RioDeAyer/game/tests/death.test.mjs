@@ -12,6 +12,8 @@ const context = vm.createContext({ Phaser: {
     return pressed;
   } } },
 } });
+vm.runInContext(readFileSync(new URL('../src/secret-room.js', import.meta.url), 'utf8')
+  .replace(/export /g, ''), context);
 vm.runInContext(source.replace(/^import .*;\r?\n/gm, '').split('new Phaser.Game(')[0]
   + '\nglobalThis.Playground = Playground;', context);
 
@@ -207,6 +209,9 @@ test('create rebuilds nine hongos, four walking turtles and fifteen unused block
   const oldBlocks = scene.powerUps;
   const oldCoins = scene.coinSystem;
   const oldBricks = scene.bricks;
+  const oldEntrance = scene.secretEntrance;
+  oldEntrance.used = true;
+  oldEntrance.collected.add(0);
   oldBricks.remaining = 0;
   scene.collectPowerUp({ type: 'white-mushroom' });
   assert.equal(scene.powered, true);
@@ -219,6 +224,9 @@ test('create rebuilds nine hongos, four walking turtles and fifteen unused block
   scene.dead = true;
   scene.init({ lives: 2, coins: 47 });
   scene.create();
+  assert.notEqual(scene.secretEntrance, oldEntrance);
+  assert.equal(scene.secretEntrance.used, false);
+  assert.equal(scene.secretEntrance.collected.size, 0);
   assert.equal(scene.lives, 2);
   assert.equal(scene.coins, 47);
   assert.notEqual(scene.coinSystem, oldCoins);

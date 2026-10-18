@@ -6,6 +6,7 @@ import { EnemySystem, preloadEnemies } from './enemies.js';
 import { PowerUpSystem, preloadPowerUps } from './powerups.js';
 import { CoinSystem, preloadCoins } from './coins.js';
 import { BrickSystem } from './bricks.js';
+import { SecretEntrance, SECRET_TREE_INDEX, ROOM, ROOM_COINS, ROOM_SURFACES, TRANSITION_MS, EXIT_CLIMB_MS, EXIT_CLIMB_RISE, makeUndergroundArt } from './secret-room.js';
 
 const WIDTH = 1280;
 const HEIGHT = 720;
@@ -61,6 +62,16 @@ const RIVER_GAPS = [
   { x: 2040, width: 112 }, { x: 3540, width: 152 },
   { x: 5080, width: 128 }, { x: 5980, width: 144 },
 ];
+// Cut stumps and standing deadwood. Each tier is [left inset, right inset,
+// height], from the flat crown down to the exposed roots at ground level.
+// The stepped silhouettes are the solids themselves, including every root.
+const WOODLAND_OBSTACLES = [
+  { x: 1828, y: 604, width: 92, kind: 'stump', tiers: [[10, 12, 20], [6, 8, 8], [0, 0, 8]] },
+  { x: 3348, y: 528, width: 76, kind: 'snag', tiers: [[22, 14, 8], [22, 10, 12], [14, 10, 12], [8, 20, 12], [18, 20, 28], [10, 14, 22], [0, 0, 18]] },
+  { x: 3792, y: 588, width: 92, kind: 'stump', tiers: [[14, 14, 32], [6, 8, 12], [0, 0, 8]] },
+  { x: 4392, y: 524, width: 76, kind: 'snag', tiers: [[14, 18, 12], [18, 18, 18], [18, 4, 14], [16, 0, 8], [16, 18, 22], [10, 12, 24], [0, 0, 18]] },
+  { x: 6576, y: 572, width: 100, kind: 'stump', tiers: [[18, 14, 44], [8, 6, 14], [0, 0, 10]] },
+];
 const LEVEL_SURFACES = [
   { x: 0, y: GROUND_Y, width: 2040, height: 80, kind: 'bank' },
   { x: 2152, y: GROUND_Y, width: 1388, height: 80, kind: 'bank' },
@@ -80,6 +91,15 @@ const LEVEL_SURFACES = [
   { x: 5390, y: 568, width: 144, height: 72, kind: 'bank' },
   { x: 5650, y: 608, width: 192, height: 32, kind: 'log' },
   { x: 6250, y: 592, width: 144, height: 48, kind: 'bank' },
+  ...WOODLAND_OBSTACLES.flatMap((tree, treeIndex) => {
+    let y = tree.y;
+    return tree.tiers.map(([left, right, height]) => {
+      const surface = { x: tree.x + left, y, width: tree.width - left - right,
+        height, kind: tree.kind, treeIndex };
+      y += height;
+      return surface;
+    });
+  }),
 ];
 const MOVEMENT = {
   walkSpeed: 280,
@@ -94,8 +114,8 @@ const approach = (value, target, amount) => value + Math.sign(target - value)
   * Math.min(Math.abs(target - value), amount);
 
 class Playground extends Phaser.Scene {
-  constructor() {
-    super('Playground');
+  constructor(sceneKey = 'Playground') {
+    super(sceneKey);
     this.movementState = 'idle';
     this.shiftKeys = new Set();
     this.lives = 3;
@@ -125,6 +145,8 @@ class Playground extends Phaser.Scene {
     this.gameOver = false;
     this.movementState = 'idle';
     this.shiftKeys.clear();
+    // Each full level rebuild gets a fresh entrance and room coin ledger.
+    this.secretEntrance = new SecretEntrance(this, WOODLAND_OBSTACLES[SECRET_TREE_INDEX]);
     this.backgrounds = this.makeScenery();
     this.makePlayerTexture();
 
@@ -228,7 +250,7 @@ class Playground extends Phaser.Scene {
     if (world.debugGraphic) {
       // Arcade draws in world coordinates. Scenery and HUD cameras must not
       // draw a second copy at a different scale or scroll position.
-      this.landscapeCamera.ignore(world.debugGraphic);
+      this.landscapeCamera?.ignore(world.debugGraphic);
       this.hudCamera.ignore(world.debugGraphic);
       world.debugGraphic.setVisible(enabled);
     }
@@ -406,8 +428,9 @@ class Playground extends Phaser.Scene {
     const left = this.cursors.left.isDown || this.keys.A.isDown;
     const right = this.cursors.right.isDown || this.keys.D.isDown;
     // Consume all edges even when an action is blocked; never queue a jump/slide.
-    const jump = [this.cursors.up, this.keys.W, this.keys.SPACE]
+    const upPressed = [this.cursors.up, this.keys.W]
       .map(key => Phaser.Input.Keyboard.JustDown(key)).some(Boolean);
+    const spacePressed = Phaser.Input.Keyboard.JustDown(this.keys.SPACE);
     const crouchPressed = [this.cursors.down, this.keys.S]
       .map(key => Phaser.Input.Keyboard.JustDown(key)).some(Boolean);
     return {
@@ -415,7 +438,8 @@ class Playground extends Phaser.Scene {
       run: this.shiftKeys.size > 0,
       crouch: this.cursors.down.isDown || this.keys.S.isDown,
       crouchPressed,
-      jump,
+      jump: upPressed || spacePressed,
+      upPressed,
     };
   }
 
@@ -524,6 +548,10 @@ class Playground extends Phaser.Scene {
       if (restart) this.startNewGame();
       return;
     }
+    if (this.secretEntrance && ['entering', 'transition', 'inside'].includes(this.secretEntrance.state)) {
+      this.secretEntrance.update(delta);
+      return;
+    }
     this.powerUps?.forEach(powerUp => powerUp.update(delta));
     if (this.dead) {
       this.enemies?.update();
@@ -534,10 +562,137 @@ class Playground extends Phaser.Scene {
       this.die('fall');
       return;
     }
-    this.updateMovement(this.readMovementInput(), Math.min(delta, 50) / 1000);
+    const input = this.readMovementInput();
+    if (this.secretEntrance?.tryEnter(input.crouchPressed)) return;
+    this.updateMovement(input, Math.min(delta, 50) / 1000);
     this.updatePlayerBody();
     this.updatePlayerAnimation();
     this.enemies?.update();
+  }
+}
+
+// A separate paused/resumed scene keeps every main-level object, timer and
+// collider alive, without serializing or reconstructing the level on return.
+class Underground extends Playground {
+  constructor() {
+    super('Underground');
+  }
+
+  init({ owner }) {
+    this.owner = owner;
+    this.lives = owner.lives;
+    this.coins = owner.coins;
+    this.powered = owner.powered;
+  }
+
+  preload() {} // Reuse the textures and animations already loaded by WORLD 1-1.
+
+  create() {
+    this.dead = this.gameOver = this.returning = false;
+    this.movementState = 'idle';
+    this.shiftKeys.clear();
+    makeUndergroundArt(this);
+    this.surfaces = this.physics.add.staticGroup();
+    for (const { x, y, width, height } of ROOM_SURFACES) {
+      this.surfaces.add(this.add.rectangle(x + width / 2, y + height / 2, width, height).setVisible(false));
+    }
+    this.physics.world.setBounds(0, 0, ROOM.width, ROOM.height);
+    this.player = this.physics.add.sprite(88, ROOM.floor - 32, 'player');
+    this.player.body.setSize(PLAYER_BODY_WIDTH, PLAYER_STANDING_HEIGHT, false)
+      .setOffset(PLAYER_BODY_OFFSET_X, PLAYER_FRAME_HEIGHT - PLAYER_STANDING_HEIGHT);
+    this.player.setCollideWorldBounds(true).setBounce(0);
+    this.playerTerrainCollider = this.physics.add.collider(this.player, this.surfaces);
+    this.coinSystem = new CoinSystem(this, this.player, ROOM_COINS, this.owner.secretEntrance.collected);
+    this.add.text(ROOM.vineX - 10, ROOM.floor - 20, '↑ / W', {
+      fontFamily: 'monospace', fontSize: '12px', color: '#d6ed9c',
+      backgroundColor: '#21140d', padding: { x: 3, y: 2 },
+    }).setOrigin(1, 1);
+
+    this.cursors = this.input.keyboard.createCursorKeys();
+    this.keys = this.input.keyboard.addKeys('A,D,W,S,SPACE,ENTER');
+    this.input.keyboard.resetKeys();
+    this.input.keyboard.addCapture(['UP', 'DOWN', 'LEFT', 'RIGHT', 'SPACE']);
+    this.input.keyboard.on('keydown', this.onShiftDown, this);
+    this.input.keyboard.on('keyup', this.onShiftUp, this);
+    this.input.keyboard.on('keydown-F2', this.togglePhysicsDebug, this);
+    this.game.events.on(Phaser.Core.Events.BLUR, this.stopMovement, this);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.input.keyboard.off('keydown', this.onShiftDown, this);
+      this.input.keyboard.off('keyup', this.onShiftUp, this);
+      this.input.keyboard.off('keydown-F2', this.togglePhysicsDebug, this);
+      this.game.events.off(Phaser.Core.Events.BLUR, this.stopMovement, this);
+      this.owner = null;
+    });
+
+    const camera = this.cameras.main;
+    camera.setZoom(VIEW_ZOOM).centerOn(ROOM.width / 2, ROOM.height / 2);
+    const worldObjects = [...this.children.list];
+    this.makeHud();
+    const hudObjects = this.children.list.slice(worldObjects.length);
+    this.hudCamera = this.cameras.add(0, 0, WIDTH, HEIGHT, false, 'hud');
+    camera.ignore(hudObjects);
+    this.hudCamera.ignore(worldObjects);
+    this.setPhysicsDebug(this.owner.physics.world.drawDebug);
+    camera.fadeIn(TRANSITION_MS, 0, 0, 0);
+  }
+
+  addCoin() {
+    this.owner.addCoin();
+    this.coins = this.owner.coins;
+    this.lives = this.owner.lives;
+    this.coinsText.setText(`x${String(this.coins).padStart(2, '0')}`);
+    this.livesText.setText(`VIDAS × ${this.lives}`);
+  }
+
+  tryExit(pressed) {
+    if (!pressed || this.returning || Math.abs(this.player.body.center.x - ROOM.vineX) > 32) return false;
+    this.returning = true;
+    this.exitElapsed = 0;
+    this.exitTransition = false;
+    this.exitStartY = Math.max(ROOM.ceiling + this.player.height / 2 + EXIT_CLIMB_RISE,
+      Math.min(ROOM.floor - this.player.height / 2, this.player.y));
+    this.player.setVelocity(0, 0);
+    this.player.body.enable = false;
+    this.physics.world.pause();
+    this.input.keyboard.resetKeys();
+    this.shiftKeys.clear();
+    this.player.anims.stop();
+    this.player.x = ROOM.vineX;
+    this.player.y = this.exitStartY;
+    this.player.setFrame('walk-1');
+    return true;
+  }
+
+  updateExit(delta) {
+    if (this.exitTransition) return;
+    this.exitElapsed = Math.min(EXIT_CLIMB_MS, this.exitElapsed + delta);
+    this.player.y = this.exitStartY - EXIT_CLIMB_RISE * this.exitElapsed / EXIT_CLIMB_MS;
+    // Reuse the two existing limb poses, without adding a sprite or animation.
+    this.player.setFrame(Math.floor(this.exitElapsed / 130) % 2 ? 'walk-2' : 'walk-1');
+    if (this.exitElapsed < EXIT_CLIMB_MS) return;
+    this.exitTransition = true;
+    const camera = this.cameras.main;
+    camera.once('camerafadeoutcomplete', () => {
+      this.owner.secretEntrance.returnToLevel();
+      this.scene.stop();
+    });
+    camera.fadeOut(TRANSITION_MS, 0, 0, 0);
+  }
+
+  update(time, delta) {
+    if (this.fpsText && time >= this.nextFpsUpdate) {
+      this.fpsText.setText(`FPS: ${Math.round(this.game.loop.actualFps)}`);
+      this.nextFpsUpdate = time + 500;
+    }
+    if (this.returning) {
+      this.updateExit(delta);
+      return;
+    }
+    const input = this.readMovementInput();
+    if (this.tryExit(input.upPressed)) return;
+    this.updateMovement(input, Math.min(delta, 50) / 1000);
+    this.updatePlayerBody();
+    this.updatePlayerAnimation();
   }
 }
 
@@ -553,5 +708,5 @@ new Phaser.Game({
     default: 'arcade',
     arcade: { gravity: { y: 1600 }, debug: false, debugShowVelocity: false },
   },
-  scene: Playground,
+  scene: [Playground, Underground],
 });
